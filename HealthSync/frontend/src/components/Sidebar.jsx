@@ -11,7 +11,8 @@ import {
   GraduationCap,
   LogOut,
   ClipboardList,
-  CalendarCheck
+  CalendarCheck,
+  Pill
 } from 'lucide-react';
 
 const Sidebar = ({ token, setToken }) => {
@@ -21,6 +22,7 @@ const Sidebar = ({ token, setToken }) => {
     { name: 'Dashboard', icon: LayoutDashboard, path: '/dashboard' },
     { name: 'Virtual Conference', icon: Video, path: '/virtual' },
     { name: 'Medical Records', icon: ClipboardList, path: '/medical-records' },
+    { name: 'Pharmacy', icon: Pill, path: '/pharmacy' },
     { name: 'Products', icon: ShoppingBag, path: '/order' },
     { name: 'Check-Ups', icon: CalendarCheck, path: '/appointments', scrollTo: 'appointments-section' },
   ];
