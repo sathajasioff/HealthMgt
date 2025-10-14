@@ -1,1 +1,4 @@
+com/example/health/config/WebConfig$1.class
 com/example/health/HealthApplication.class
+com/example/health/config/WebConfig.class
+com/example/health/controller/HelloController.class
