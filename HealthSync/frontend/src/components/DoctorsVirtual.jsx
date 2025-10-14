@@ -2,13 +2,70 @@ import React, { useState } from 'react';
 import { Search, Grid, List, Calendar, Phone, X } from 'lucide-react';
 import { doctors } from '../assets/assets';
 import { useNavigate } from 'react-router-dom';
+import PatientAvailabilityModal from './PatientAvailabilityModal';
+import { useNotification } from '../context/NotificationContext';
 import 'bootstrap-icons/font/bootstrap-icons.css';
 
 const DoctorsVirtual = () => {
   const [activeCategory, setActiveCategory] = useState('ALL');
   const [viewMode, setViewMode] = useState('grid');
   const [searchQuery, setSearchQuery] = useState('');
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedDoctor, setSelectedDoctor] = useState(null);
   const navigate = useNavigate();
+  const { showToast, addNotification } = useNotification();
+
+  const handleAvailabilityClick = (doctor) => {
+    setSelectedDoctor(doctor);
+    setIsModalOpen(true);
+  };
+
+  const handlePatientSubmit = (patientData) => {
+    // Use the selected time from the form
+    const appointmentTime = patientData.selectedTime;
+
+    // Create new appointment object with selected doctor info
+    const newAppointment = {
+      name: selectedDoctor.name,
+      specialization: selectedDoctor.speciality,
+      time: appointmentTime,
+      patient: patientData.patientName,
+      patientAge: patientData.age,
+      patientGender: patientData.gender,
+      healthIssue: patientData.healthIssue,
+      status: 'Waiting',
+      statusColor: 'bg-yellow-500',
+      type: 'Scheduled',
+      isNew: true
+    };
+
+    // Get existing appointments from localStorage
+    const existingAppointments = JSON.parse(localStorage.getItem('newPatients') || '[]');
+    
+    // Add new appointment at the beginning
+    const updatedAppointments = [newAppointment, ...existingAppointments];
+    
+    // Save to localStorage
+    localStorage.setItem('newPatients', JSON.stringify(updatedAppointments));
+    
+    // Show beautiful toast notification
+    const toastMessage = `Appointment booked successfully with ${selectedDoctor.name}!\nPatient: ${patientData.patientName}\nTime: ${appointmentTime}`;
+    showToast(toastMessage, 'success', 5000);
+    
+    // Add to notification center
+    addNotification({
+      type: 'appointment',
+      title: 'New Appointment Booked',
+      message: `${patientData.patientName} has booked an appointment with ${selectedDoctor.name}`,
+      details: {
+        doctor: selectedDoctor.name,
+        patient: patientData.patientName,
+        time: appointmentTime,
+        specialization: selectedDoctor.speciality,
+        healthIssue: patientData.healthIssue
+      }
+    });
+  };
 
   const categories = [
     'ALL',
@@ -150,13 +207,16 @@ const DoctorsVirtual = () => {
 
               {/* Action Buttons */}
               <div className="flex items-center gap-2 pt-5 border-t border-gray-100">
-                <button className="flex-1 flex items-center justify-center gap-2 py-2.5 text-gray-600  rounded-lg transition-all duration-200 text-sm font-medium">
+                <button 
+                  onClick={() => handleAvailabilityClick(doctor)}
+                  className="flex-1 flex items-center justify-center gap-2 py-2.5 text-gray-600 hover:bg-gray-50 rounded-lg transition-all duration-200 text-sm font-medium"
+                >
                   <Calendar size={16} />
                   <span>Availability</span>
                 </button>
                 <button 
-                  onClick={() => navigate('/homeroom')}
-                  className="flex-1 flex items-center justify-center gap-2 py-2.5 text-gray-600 rounded-lg transition-all duration-200 text-sm font-medium"
+                  onClick={() => navigate('/homeroom', { state: { doctor } })}
+                  className="flex-1 flex items-center justify-center gap-2 py-2.5 text-white bg-primary hover:bg-primary/90 rounded-lg transition-all duration-200 text-sm font-medium"
                 >
                   <Phone size={16} />
                   <span>Make a call</span>
@@ -179,6 +239,14 @@ const DoctorsVirtual = () => {
           </div>
         )}
       </div>
+
+      {/* Patient Availability Modal */}
+      <PatientAvailabilityModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        onSubmit={handlePatientSubmit}
+        selectedDoctor={selectedDoctor}
+      />
     </div>
   );
 };

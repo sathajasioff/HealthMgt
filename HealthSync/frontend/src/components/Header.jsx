@@ -2,11 +2,15 @@ import React, { useState } from 'react';
 import { Search, Bell, LogOut, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { assets } from '../assets/assets';
+import { useNotification } from '../context/NotificationContext';
+import NotificationPanel from './NotificationPanel';
 
 const Header = ({ token, setToken }) => {
     const navigate = useNavigate();
     const [searchQuery, setSearchQuery] = useState('');
     const [isSearchFocused, setIsSearchFocused] = useState(false);
+    const [isNotificationPanelOpen, setIsNotificationPanelOpen] = useState(false);
+    const { unreadCount } = useNotification();
 
     const scrollToAppointments = () => {
         const appointmentsSection = document.getElementById('appointments-section');
@@ -46,9 +50,16 @@ const Header = ({ token, setToken }) => {
 
                 {/* Right Section */}
                 <div className="flex items-center gap-12">
-                    <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors relative">
+                    <button 
+                        onClick={() => setIsNotificationPanelOpen(true)}
+                        className="p-2 hover:bg-gray-100 rounded-lg transition-colors relative"
+                    >
                         <Bell size={20} className="text-gray-700" />
-                        <span className="absolute -top-1 -right-1 w-2 h-2 bg-primary rounded-full"></span>
+                        {unreadCount > 0 && (
+                            <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center px-1">
+                                {unreadCount > 9 ? '9+' : unreadCount}
+                            </span>
+                        )}
                     </button>
                     {token ? (
                         <div className='flex items-center gap-2 cursor-pointer group relative'>
@@ -104,6 +115,12 @@ const Header = ({ token, setToken }) => {
                     />
                 </div>
             </div>
+
+            {/* Notification Panel */}
+            <NotificationPanel
+                isOpen={isNotificationPanelOpen}
+                onClose={() => setIsNotificationPanelOpen(false)}
+            />
         </div>
     );
 };

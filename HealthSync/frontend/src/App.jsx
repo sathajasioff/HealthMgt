@@ -10,10 +10,13 @@ import PaymentGateway from './pages/PaymentGateway'
 import HomeRoom from './pages/Room/HomeRoom'
 import PharmacyLocator from './pages/PharmacyLocator'
 import MedicalRecords from './pages/MedicalRecords'
+import Pharmacy from './pages/Pharmacy'
+import { NotificationProvider } from './context/NotificationContext'
 
 const App = () => {
   return (
-    <Routes>
+    <NotificationProvider>
+      <Routes>
       {/* Public Routes */}
       <Route path='/' element={<Login />} />
       <Route path='/pay' element={<PaymentGateway />} />
@@ -28,6 +31,7 @@ const App = () => {
       <Route path='/order' element={<Order />} />
       <Route path='/virtual' element={<VirtualVideoConference />} />
       <Route path='/medical-records' element={<MedicalRecords />} />
+      <Route path='/pharmacy' element={<Pharmacy />} />
       <Route path='/recruitment' element={<Dashboard />} />
       <Route path='/interview' element={<Dashboard />} />
       <Route path='/onboarding' element={<Dashboard />} />
@@ -36,7 +40,8 @@ const App = () => {
       <Route path='/training' element={<Dashboard />} />
       <Route path='/my-profile' element={<Dashboard />} />
       <Route path='/my-appointments' element={<Dashboard />} />
-    </Routes>
+      </Routes>
+    </NotificationProvider>
   )
 }
 

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import Sidebar from '../components/Sidebar';
 import Header from '../components/Header';
 import MedicalRecordForm from '../components/MedicalRecordForm';
+import Logo from '../assets/LogoWHITE.png';
 import { 
   FileText, 
   Plus, 
@@ -71,65 +72,350 @@ const MedicalRecords = () => {
   };
 
   const handleDownloadRecord = (record) => {
-    const recordText = `
-MEDICAL RECORD
-==============
+    const htmlContent = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Medical Record - ${record.patientName}</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Arial', sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+        }
+        .header {
+            background: linear-gradient(135deg, #14b8a6 0%, #0d9488 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        .header h1 {
+            font-size: 32px;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+        }
+        .header img {
+            height: 50px;
+            width: auto;
+        }
+        .header p {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+        .content {
+            padding: 30px;
+        }
+        .section {
+            margin-bottom: 25px;
+            border-bottom: 2px solid #e5e7eb;
+            padding-bottom: 20px;
+        }
+        .section:last-child {
+            border-bottom: none;
+        }
+        .section-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: #14b8a6;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+        }
+        .info-item {
+            background: #f9fafb;
+            padding: 12px;
+            border-radius: 8px;
+        }
+        .info-label {
+            font-size: 12px;
+            color: #6b7280;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+        .info-value {
+            font-size: 14px;
+            color: #111827;
+            font-weight: 500;
+        }
+        .full-width {
+            grid-column: 1 / -1;
+        }
+        .footer {
+            background: #f9fafb;
+            padding: 20px 30px;
+            text-align: center;
+            font-size: 12px;
+            color: #6b7280;
+            border-top: 2px solid #e5e7eb;
+        }
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            background: #14b8a6;
+            color: white;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        @media print {
+            body {
+                background: white;
+                padding: 0;
+            }
+            .container {
+                box-shadow: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>
+                <span style="display: inline-flex; align-items: center; gap: 15px;">
+                    <span>HealthSync</span>
+                </span>
+            </h1>
+            <p>Medical Record Document</p>
+        </div>
 
-Patient Information:
-- Name: ${record.patientName}
-- Age: ${record.patientAge}
-- Gender: ${record.patientGender}
-- Date: ${record.consultationDate}
+        <!-- Content -->
+        <div class="content">
+            <!-- Patient Information -->
+            <div class="section">
+                <div class="section-title">
+                    👤 Patient Information
+                </div>
+                <div class="info-grid">
+                    <div class="info-item">
+                        <div class="info-label">Full Name</div>
+                        <div class="info-value">${record.patientName}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Age</div>
+                        <div class="info-value">${record.patientAge} years</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Gender</div>
+                        <div class="info-value">${record.patientGender}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Consultation Date</div>
+                        <div class="info-value">${new Date(record.consultationDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</div>
+                    </div>
+                </div>
+            </div>
 
-Chief Complaint:
-${record.chiefComplaint}
+            <!-- Chief Complaint & Symptoms -->
+            <div class="section">
+                <div class="section-title">
+                    🩺 Chief Complaint & Symptoms
+                </div>
+                <div class="info-grid">
+                    <div class="info-item full-width">
+                        <div class="info-label">Chief Complaint</div>
+                        <div class="info-value">${record.chiefComplaint}</div>
+                    </div>
+                    ${record.symptoms ? `
+                    <div class="info-item full-width">
+                        <div class="info-label">Symptoms</div>
+                        <div class="info-value">${record.symptoms}</div>
+                    </div>
+                    ` : ''}
+                </div>
+            </div>
 
-Symptoms:
-${record.symptoms || 'N/A'}
+            <!-- Vital Signs -->
+            ${Object.values(record.vitalSigns).some(v => v) ? `
+            <div class="section">
+                <div class="section-title">
+                    ❤️ Vital Signs
+                </div>
+                <div class="info-grid">
+                    ${record.vitalSigns.bloodPressure ? `
+                    <div class="info-item">
+                        <div class="info-label">Blood Pressure</div>
+                        <div class="info-value">${record.vitalSigns.bloodPressure}</div>
+                    </div>
+                    ` : ''}
+                    ${record.vitalSigns.heartRate ? `
+                    <div class="info-item">
+                        <div class="info-label">Heart Rate</div>
+                        <div class="info-value">${record.vitalSigns.heartRate} bpm</div>
+                    </div>
+                    ` : ''}
+                    ${record.vitalSigns.temperature ? `
+                    <div class="info-item">
+                        <div class="info-label">Temperature</div>
+                        <div class="info-value">${record.vitalSigns.temperature}°F</div>
+                    </div>
+                    ` : ''}
+                    ${record.vitalSigns.respiratoryRate ? `
+                    <div class="info-item">
+                        <div class="info-label">Respiratory Rate</div>
+                        <div class="info-value">${record.vitalSigns.respiratoryRate} /min</div>
+                    </div>
+                    ` : ''}
+                    ${record.vitalSigns.oxygenSaturation ? `
+                    <div class="info-item">
+                        <div class="info-label">O2 Saturation</div>
+                        <div class="info-value">${record.vitalSigns.oxygenSaturation}%</div>
+                    </div>
+                    ` : ''}
+                </div>
+            </div>
+            ` : ''}
 
-Vital Signs:
-- Blood Pressure: ${record.vitalSigns.bloodPressure || 'N/A'}
-- Heart Rate: ${record.vitalSigns.heartRate || 'N/A'}
-- Temperature: ${record.vitalSigns.temperature || 'N/A'}
-- Respiratory Rate: ${record.vitalSigns.respiratoryRate || 'N/A'}
-- O2 Saturation: ${record.vitalSigns.oxygenSaturation || 'N/A'}
+            <!-- Medical History -->
+            ${record.medicalHistory || record.allergies ? `
+            <div class="section">
+                <div class="section-title">
+                    📋 Medical History
+                </div>
+                <div class="info-grid">
+                    ${record.medicalHistory ? `
+                    <div class="info-item full-width">
+                        <div class="info-label">Medical History</div>
+                        <div class="info-value">${record.medicalHistory}</div>
+                    </div>
+                    ` : ''}
+                    ${record.allergies ? `
+                    <div class="info-item full-width">
+                        <div class="info-label">Allergies</div>
+                        <div class="info-value">${record.allergies}</div>
+                    </div>
+                    ` : ''}
+                </div>
+            </div>
+            ` : ''}
 
-Medical History:
-${record.medicalHistory || 'N/A'}
+            <!-- Diagnosis -->
+            <div class="section">
+                <div class="section-title">
+                    🔬 Diagnosis
+                </div>
+                <div class="info-grid">
+                    <div class="info-item full-width">
+                        <div class="info-label">Primary Diagnosis</div>
+                        <div class="info-value">${record.diagnosis}</div>
+                    </div>
+                </div>
+            </div>
 
-Allergies:
-${record.allergies || 'N/A'}
+            <!-- Medications & Treatment -->
+            ${record.currentMedications || record.prescribedMedications || record.labTests ? `
+            <div class="section">
+                <div class="section-title">
+                    💊 Medications & Treatment
+                </div>
+                <div class="info-grid">
+                    ${record.currentMedications ? `
+                    <div class="info-item full-width">
+                        <div class="info-label">Current Medications</div>
+                        <div class="info-value">${record.currentMedications}</div>
+                    </div>
+                    ` : ''}
+                    ${record.prescribedMedications ? `
+                    <div class="info-item full-width">
+                        <div class="info-label">Prescribed Medications</div>
+                        <div class="info-value">${record.prescribedMedications}</div>
+                    </div>
+                    ` : ''}
+                    ${record.labTests ? `
+                    <div class="info-item full-width">
+                        <div class="info-label">Lab Tests Ordered</div>
+                        <div class="info-value">${record.labTests}</div>
+                    </div>
+                    ` : ''}
+                </div>
+            </div>
+            ` : ''}
 
-Diagnosis:
-${record.diagnosis}
+            <!-- Recommendations & Notes -->
+            ${record.recommendations || record.notes || record.followUpDate ? `
+            <div class="section">
+                <div class="section-title">
+                    📝 Recommendations & Follow-up
+                </div>
+                <div class="info-grid">
+                    ${record.recommendations ? `
+                    <div class="info-item full-width">
+                        <div class="info-label">Recommendations</div>
+                        <div class="info-value">${record.recommendations}</div>
+                    </div>
+                    ` : ''}
+                    ${record.notes ? `
+                    <div class="info-item full-width">
+                        <div class="info-label">Additional Notes</div>
+                        <div class="info-value">${record.notes}</div>
+                    </div>
+                    ` : ''}
+                    ${record.followUpDate ? `
+                    <div class="info-item">
+                        <div class="info-label">Follow-up Date</div>
+                        <div class="info-value">${new Date(record.followUpDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</div>
+                    </div>
+                    ` : ''}
+                </div>
+            </div>
+            ` : ''}
+        </div>
 
-Current Medications:
-${record.currentMedications || 'N/A'}
-
-Prescribed Medications:
-${record.prescribedMedications || 'N/A'}
-
-Lab Tests:
-${record.labTests || 'N/A'}
-
-Recommendations:
-${record.recommendations || 'N/A'}
-
-Additional Notes:
-${record.notes || 'N/A'}
-
-Follow-up Date: ${record.followUpDate || 'N/A'}
+        <!-- Footer -->
+        <div class="footer">
+            <p><strong>HealthSync Medical Records</strong></p>
+            <p>This is a computer-generated document and does not require a signature.</p>
+            <p>Generated on: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
+        </div>
+    </div>
+</body>
+</html>
     `;
 
-    const blob = new Blob([recordText], { type: 'text/plain' });
+    const blob = new Blob([htmlContent], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `medical_record_${record.patientName.replace(/\s+/g, '_')}_${record.consultationDate}.txt`;
+    a.download = `medical_record_${record.patientName.replace(/\s+/g, '_')}_${record.consultationDate}.html`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+    
+    // Open in new window for printing as PDF
+    const printWindow = window.open(url, '_blank');
+    if (printWindow) {
+      printWindow.onload = () => {
+        setTimeout(() => {
+          printWindow.print();
+        }, 250);
+      };
+    }
   };
 
   return (
