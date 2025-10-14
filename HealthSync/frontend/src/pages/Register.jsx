@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { UserPlus, Upload, Lock, Plus, Stethoscope, User, Mail } from 'lucide-react';
+import { UserPlus, Upload, Lock, Plus, Stethoscope, User, Mail, Briefcase } from 'lucide-react';
 import { assets } from '../assets/assets';
 
 const Register = () => {
@@ -100,7 +100,7 @@ const Register = () => {
                 <label className="block text-sm font-semibold text-gray-700 mb-3">
                   I am a:
                 </label>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-3 gap-3">
                   {/* Patient Option */}
                   <label
                     className={`relative flex flex-col items-center justify-center p-4 border-2 rounded-xl cursor-pointer transition-all duration-300 ${
@@ -160,6 +160,37 @@ const Register = () => {
                     </span>
                     <span className="text-xs text-gray-500 text-center mt-1">
                       Healthcare provider
+                    </span>
+                  </label>
+
+                  {/* Staff Option */}
+                  <label
+                    className={`relative flex flex-col items-center justify-center p-4 border-2 rounded-xl cursor-pointer transition-all duration-300 ${
+                      formData.userRole === 'staff'
+                        ? 'border-primary bg-green-50 shadow-md scale-105'
+                        : 'border-gray-200 bg-white hover:border-primary/50 hover:shadow-sm'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="userRole"
+                      value="staff"
+                      checked={formData.userRole === 'staff'}
+                      onChange={handleChange}
+                      className="absolute top-3 right-3 w-4 h-4 text-primary"
+                    />
+                    <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-2 ${
+                      formData.userRole === 'staff' ? 'bg-primary/10' : 'bg-gray-100'
+                    }`}>
+                      <Briefcase size={24} className={formData.userRole === 'staff' ? 'text-primary' : 'text-gray-400'} />
+                    </div>
+                    <span className={`text-sm font-semibold ${
+                      formData.userRole === 'staff' ? 'text-primary' : 'text-gray-700'
+                    }`}>
+                      Staff
+                    </span>
+                    <span className="text-xs text-gray-500 text-center mt-1">
+                      Administrative
                     </span>
                   </label>
                 </div>
