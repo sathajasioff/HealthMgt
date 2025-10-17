@@ -19,6 +19,8 @@ import {
   X
 } from 'lucide-react';
 import { useNotification } from '../context/NotificationContext';
+import API from '../services/api';
+import { useNavigate } from 'react-router-dom';
 
 const Pharmacy = () => {
   const [token, setToken] = useState(true);
@@ -28,9 +30,15 @@ const Pharmacy = () => {
   const [prescriptionPreview, setPrescriptionPreview] = useState(null);
   const [prescriptions, setPrescriptions] = useState([]);
   const [notes, setNotes] = useState('');
+  const [showDeliveryModal, setShowDeliveryModal] = useState(false);
+  const [selectedApprovedPrescription, setSelectedApprovedPrescription] = useState(null);
+  const [deliveryMethod, setDeliveryMethod] = useState('home'); // 'home' | 'pickup'
+  const navigate = useNavigate();
   const { showToast } = useNotification();
-
-  const pharmacies = [
+  const user = (() => { try { return JSON.parse(localStorage.getItem('user') || 'null'); } catch { return null; } })();
+  const userId = user?.id || user?._id;
+  const patientName = user?.name || user?.fullName || user?.username || 'Patient';
+  const [pharmacies, setPharmacies] = useState([
     {
       id: 1,
       name: 'City Pharmacy',
@@ -79,15 +87,94 @@ const Pharmacy = () => {
       email: 'quickmed@pharmacy.com',
       hours: '7 AM - 11 PM'
     }
-  ];
+  ]);
 
   useEffect(() => {
+    loadPharmacies();
     loadPrescriptions();
   }, []);
 
-  const loadPrescriptions = () => {
-    const saved = JSON.parse(localStorage.getItem('prescriptions') || '[]');
-    setPrescriptions(saved);
+  const loadPrescriptions = async () => {
+    try {
+      if (!userId) return setPrescriptions([]);
+      const res = await API.get(`/prescriptions/patient/${userId}`);
+      const list = Array.isArray(res.data) ? res.data : [];
+      const withUi = list.map(p => ({
+        ...p,
+        statusColor: (p.status === 'Approved') ? 'bg-green-500' : (p.status === 'Rejected') ? 'bg-red-500' : 'bg-yellow-500',
+      }));
+      setPrescriptions(withUi);
+    } catch (e) {
+      setPrescriptions([]);
+    }
+  };
+
+  const openDeliveryModal = (prescription) => {
+    setSelectedApprovedPrescription(prescription);
+    setDeliveryMethod('home');
+    setShowDeliveryModal(true);
+  };
+
+  const proceedToPayment = async () => {
+    if (!selectedApprovedPrescription) return;
+    try {
+      const rx = selectedApprovedPrescription;
+      // If quoted bill exists, create payment snapshot from prescription and use its totals
+      if (rx.status === 'Quoted' || (Array.isArray(rx.items) && rx.items.length > 0)) {
+        const payRes = await API.post(`/payments/from-prescription/${rx.id || rx._id}`, {
+          method: 'creditCard',
+          deliveryMethod
+        });
+        const payment = payRes.data;
+        const items = payment.items || rx.items || [];
+        const cart = items.map((it, idx) => ({
+          id: it.productId || `${idx}`,
+          name: it.medicineName,
+          image: '',
+          price: it.unitPrice || 0,
+          quantity: it.quantity || 1
+        }));
+        const totalPrice = payment.grandTotal ?? payment.totalPrice ?? 0;
+        navigate('/pay', { state: { cart, totalPrice, deliveryMethod, paymentId: payment.id } });
+        return;
+      }
+
+      // Fallback: legacy approved without items
+      const price = 0;
+      const cart = [{
+        id: rx.id || rx._id,
+        name: rx.fileName || 'Prescription',
+        image: '',
+        price,
+        quantity: 1
+      }];
+      navigate('/pay', { state: { cart, totalPrice: price, deliveryMethod } });
+    } catch (e) {
+      showToast('Failed to prepare payment', 'error');
+    }
+  };
+
+  const loadPharmacies = async () => {
+    try {
+      const res = await API.get('/pharmacies');
+      const list = Array.isArray(res.data) ? res.data : [];
+      // Map to UI fields expected below
+      const mapped = list.map((p, idx) => ({
+        id: p.id || p._id || idx,
+        name: p.name,
+        distance: '',
+        rating: p.rating ?? 4.7,
+        stock: p.stock || 'Full Stock',
+        stockColor: 'bg-blue-500',
+        address: p.address || '-',
+        phone: p.phone || '-',
+        email: p.email || '-',
+        hours: p.hours || '-',
+      }));
+      if (mapped.length) setPharmacies(mapped);
+    } catch (e) {
+      // keep defaults
+    }
   };
 
   const handlePharmacySelect = (pharmacy) => {
@@ -98,6 +185,19 @@ const Pharmacy = () => {
   const handleFileChange = (e) => {
     const file = e.target.files[0];
     if (file) {
+      // Validate type and size (<=5MB)
+      const isValidType = file.type.startsWith('image/') || file.type === 'application/pdf';
+      const isValidSize = file.size <= 5 * 1024 * 1024;
+      if (!isValidType) {
+        showToast('Only images or PDF are allowed', 'error');
+        e.target.value = '';
+        return;
+      }
+      if (!isValidSize) {
+        showToast('File too large. Max 5MB allowed', 'error');
+        e.target.value = '';
+        return;
+      }
       setPrescriptionFile(file);
       
       // Create preview
@@ -109,36 +209,41 @@ const Pharmacy = () => {
     }
   };
 
-  const handleSubmitPrescription = () => {
+  const handleSubmitPrescription = async () => {
     if (!prescriptionFile || !selectedPharmacy) {
       showToast('Please select a file and pharmacy', 'error');
       return;
     }
+    if (!userId) {
+      showToast('Login required', 'error');
+      return;
+    }
+    try {
+      const fd = new FormData();
+      fd.append('patientId', userId);
+      fd.append('patientName', patientName);
+      fd.append('file', prescriptionFile);
+      if (notes) fd.append('notes', notes);
+      fd.append('pharmacyName', selectedPharmacy.name);
+      if (selectedPharmacy.address) fd.append('pharmacyAddress', selectedPharmacy.address);
+      if (selectedPharmacy.phone) fd.append('pharmacyPhone', selectedPharmacy.phone);
+      if (selectedPharmacy.email) fd.append('pharmacyEmail', selectedPharmacy.email);
+      if (selectedPharmacy.hours) fd.append('pharmacyHours', selectedPharmacy.hours);
+      if (selectedPharmacy.rating != null) fd.append('pharmacyRating', selectedPharmacy.rating);
+      if (selectedPharmacy.stock) fd.append('pharmacyStock', selectedPharmacy.stock);
 
-    const newPrescription = {
-      id: Date.now(),
-      pharmacy: selectedPharmacy,
-      fileName: prescriptionFile.name,
-      filePreview: prescriptionPreview,
-      notes: notes,
-      status: 'Pending',
-      statusColor: 'bg-yellow-500',
-      submittedDate: new Date().toISOString(),
-      patientName: 'Current Patient' // In real app, get from auth
-    };
-
-    const updated = [newPrescription, ...prescriptions];
-    setPrescriptions(updated);
-    localStorage.setItem('prescriptions', JSON.stringify(updated));
-
-    showToast('Prescription submitted successfully!', 'success');
-    
-    // Reset form
-    setShowUploadModal(false);
-    setSelectedPharmacy(null);
-    setPrescriptionFile(null);
-    setPrescriptionPreview(null);
-    setNotes('');
+      await API.post('/prescriptions/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      showToast('Prescription submitted successfully!', 'success');
+      await loadPrescriptions();
+      // Reset form
+      setShowUploadModal(false);
+      setSelectedPharmacy(null);
+      setPrescriptionFile(null);
+      setPrescriptionPreview(null);
+      setNotes('');
+    } catch (e) {
+      showToast('Failed to submit prescription', 'error');
+    }
   };
 
   const getStatusIcon = (status) => {
@@ -231,7 +336,13 @@ const Pharmacy = () => {
             ) : (
               <div className="space-y-4">
                 {prescriptions.map((prescription) => (
-                  <div key={prescription.id} className="border-2 border-gray-200 rounded-xl p-5 hover:shadow-md transition-shadow">
+                  <div
+                    key={prescription.id || prescription._id}
+                    className={`border-2 border-gray-200 rounded-xl p-5 hover:shadow-md transition-shadow ${prescription.status === 'Approved' ? 'cursor-pointer' : ''}`}
+                    onClick={() => {
+                      if (prescription.status === 'Approved' || prescription.status === 'Quoted') openDeliveryModal(prescription);
+                    }}
+                  >
                     <div className="flex items-start gap-4">
                       <div className="bg-blue-100 p-3 rounded-xl">
                         <FileText className="text-blue-600" size={28} />
@@ -240,7 +351,7 @@ const Pharmacy = () => {
                       <div className="flex-1">
                         <div className="flex items-start justify-between mb-3">
                           <div>
-                            <h3 className="text-lg font-bold text-gray-800">{prescription.pharmacy.name}</h3>
+                            <h3 className="text-lg font-bold text-gray-800">{prescription.pharmacy?.name || prescription.pharmacyName || 'Pharmacy'}</h3>
                             <p className="text-sm text-gray-600">{prescription.fileName}</p>
                           </div>
                           
@@ -259,12 +370,53 @@ const Pharmacy = () => {
                               {new Date(prescription.submittedDate).toLocaleDateString()}
                             </p>
                           </div>
-                          <div>
-                            <p className="text-gray-500">Pharmacy Contact</p>
-                            <p className="font-medium text-gray-800">{prescription.pharmacy.phone}</p>
-                          </div>
+                          {prescription.pharmacy?.phone && (
+                            <div>
+                              <p className="text-gray-500">Pharmacy Contact</p>
+                              <p className="font-medium text-gray-800">{prescription.pharmacy.phone}</p>
+                            </div>
+                          )}
                         </div>
-
+                        {(prescription.status === 'Approved' || prescription.status === 'Quoted') && (
+                          <div className="mt-3">
+                            <span className="inline-block text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded">{prescription.status === 'Quoted' ? 'Quoted • Click to review and choose delivery' : 'Approved • Click to choose delivery method'}</span>
+                          </div>
+                        )}
+                        {prescription.status === 'Quoted' && Array.isArray(prescription.items) && (
+                          <div className="mt-4">
+                            <div className="text-sm font-semibold text-gray-800 mb-2">Quoted Items</div>
+                            <div className="overflow-x-auto">
+                              <table className="min-w-full text-sm">
+                                <thead>
+                                  <tr className="text-left text-gray-500">
+                                    <th className="py-1 pr-4">Medicine</th>
+                                    <th className="py-1 pr-4">Dosage</th>
+                                    <th className="py-1 pr-4">Qty</th>
+                                    <th className="py-1 pr-4">Unit</th>
+                                    <th className="py-1 pr-4">Total</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {prescription.items.map((it, i) => (
+                                    <tr key={i} className="border-t border-gray-100">
+                                      <td className="py-1 pr-4">{it.medicineName}</td>
+                                      <td className="py-1 pr-4">{it.dosage}</td>
+                                      <td className="py-1 pr-4">{it.quantity}</td>
+                                      <td className="py-1 pr-4">Rs.{(it.unitPrice || 0).toFixed(2)}</td>
+                                      <td className="py-1 pr-4">Rs.{(it.lineTotal || ((it.unitPrice||0)*(it.quantity||0))).toFixed(2)}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                            <div className="mt-2 text-sm text-gray-700">
+                              <div>Subtotal: <span className="font-semibold">Rs.{(prescription.subtotal ?? 0).toFixed(2)}</span></div>
+                              <div>Tax: <span className="font-semibold">Rs.{(prescription.taxAmount ?? 0).toFixed(2)}</span></div>
+                              <div>Delivery: <span className="font-semibold">Rs.{(prescription.deliveryFee ?? 0).toFixed(2)}</span></div>
+                              <div className="font-bold">Grand Total: <span className="text-primary">Rs.{(prescription.grandTotal ?? prescription.totalPrice ?? 0).toFixed(2)}</span></div>
+                            </div>
+                          </div>
+                        )}
                         {prescription.notes && (
                           <div className="mt-3 bg-gray-50 p-3 rounded-lg">
                             <p className="text-xs text-gray-500 mb-1">Notes</p>
@@ -280,6 +432,38 @@ const Pharmacy = () => {
           </div>
         </div>
       </div>
+
+      {/* Delivery Method Modal */}
+      {showDeliveryModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl">
+            <div className="p-6 border-b border-gray-200">
+              <h3 className="text-2xl font-bold text-gray-800">Delivery Method</h3>
+              <p className="text-gray-600 text-sm">How would you like to receive your medicines?</p>
+            </div>
+            <div className="p-6 space-y-4">
+              <label className={`flex items-start gap-3 p-4 border-2 rounded-xl cursor-pointer ${deliveryMethod === 'home' ? 'border-primary bg-green-50' : 'border-gray-200 hover:border-primary/50'}`}>
+                <input type="radio" name="delivery" className="mt-1" checked={deliveryMethod === 'home'} onChange={() => setDeliveryMethod('home')} />
+                <div>
+                  <div className="font-semibold text-gray-900">Home Delivery</div>
+                  <div className="text-sm text-gray-500">Delivered within 2-4 hours</div>
+                </div>
+              </label>
+              <label className={`flex items-start gap-3 p-4 border-2 rounded-xl cursor-pointer ${deliveryMethod === 'pickup' ? 'border-primary bg-green-50' : 'border-gray-200 hover:border-primary/50'}`}>
+                <input type="radio" name="delivery" className="mt-1" checked={deliveryMethod === 'pickup'} onChange={() => setDeliveryMethod('pickup')} />
+                <div>
+                  <div className="font-semibold text-gray-900">Store Pickup</div>
+                  <div className="text-sm text-gray-500">Ready in 30 minutes</div>
+                </div>
+              </label>
+            </div>
+            <div className="p-6 border-t border-gray-200 flex gap-3">
+              <button onClick={() => { setShowDeliveryModal(false); setSelectedApprovedPrescription(null); }} className="flex-1 px-4 py-3 border-2 border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 font-semibold">Cancel</button>
+              <button onClick={proceedToPayment} className="flex-1 px-4 py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-semibold">Proceed to Payment</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Upload Prescription Modal */}
       {showUploadModal && (

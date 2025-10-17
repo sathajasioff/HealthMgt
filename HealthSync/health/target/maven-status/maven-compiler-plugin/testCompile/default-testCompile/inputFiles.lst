@@ -1,1 +1,5 @@
 /Users/jasinthan/Desktop/HealthSync/HealthSync/health/src/test/java/com/example/health/HealthApplicationTests.java
+/Users/jasinthan/Desktop/HealthSync/HealthSync/health/src/test/java/com/example/health/controller/AmbulanceDispatchControllerTest.java
+/Users/jasinthan/Desktop/HealthSync/HealthSync/health/src/test/java/com/example/health/controller/DoctorControllerTest.java
+/Users/jasinthan/Desktop/HealthSync/HealthSync/health/src/test/java/com/example/health/controller/HospitalControllerTest.java
+/Users/jasinthan/Desktop/HealthSync/HealthSync/health/src/test/java/com/example/health/controller/PharmacyControllerTest.java

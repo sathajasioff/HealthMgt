@@ -9,12 +9,15 @@ import com.example.health.repository.UserRepository;
 import com.example.health.service.UserService;
 
 import lombok.RequiredArgsConstructor;
+import org.springframework.web.multipart.MultipartFile;
+import com.example.health.service.StorageService;
 
 @Service
 @RequiredArgsConstructor
 public class UserServiceImpl implements UserService {
 
     private final UserRepository userRepository;
+    private final StorageService storageService;
 
     @Override
     public User registerUser(User user) {
@@ -42,5 +45,34 @@ public class UserServiceImpl implements UserService {
     @Override
     public List<User> getAllUsers() {
         return userRepository.findAll();
+    }
+
+    @Override
+    public User findByEmail(String email) {
+        return userRepository.findByEmail(email).orElse(null);
+    }
+
+    @Override
+    public User findById(String id) {
+        return userRepository.findById(id).orElseThrow(() -> new RuntimeException("User not found"));
+    }
+
+    @Override
+    public User updateUser(String id, User updates) {
+        User existing = findById(id);
+        if (updates.getName() != null) existing.setName(updates.getName());
+        if (updates.getEmail() != null) existing.setEmail(updates.getEmail());
+        if (updates.getPassword() != null && !updates.getPassword().isBlank()) existing.setPassword(updates.getPassword());
+        if (updates.getRole() != null) existing.setRole(updates.getRole());
+        return userRepository.save(existing);
+    }
+
+    @Override
+    public User updateUserImage(String id, MultipartFile image) {
+        if (image == null || image.isEmpty()) throw new RuntimeException("No image provided");
+        User existing = findById(id);
+        String url = storageService.store(image);
+        existing.setImageUrl(url);
+        return userRepository.save(existing);
     }
 }

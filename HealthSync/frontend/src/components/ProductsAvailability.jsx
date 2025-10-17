@@ -1,42 +1,65 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Package, TrendingUp, AlertCircle, CheckCircle, Search, Filter, ChevronRight } from 'lucide-react';
-import { products } from '../assets/assets';
+import API from '../services/api';
 
 const ProductsAvailability = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('all'); // all, in-stock, low-stock, out-of-stock
+  const [items, setItems] = useState([]);
+
+  // Load active products from backend
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const res = await API.get('/products/active');
+        const base = API.defaults.baseURL.replace(/\/$/, '');
+        const mapped = (Array.isArray(res.data) ? res.data : []).map(p => ({
+          id: p.id || p._id,
+          name: p.name,
+          price: p.price || 0,
+          stock: p.stockQty ?? 0,
+          category: p.category || 'General',
+          image: `${base}/products/${p.id || p._id}/image?ts=${Date.now()}`,
+        }));
+        setItems(mapped);
+      } catch (_) {
+        setItems([]);
+      }
+    };
+    load();
+  }, []);
 
   // Calculate stock statistics
   const getStockStats = () => {
-    const inStock = products.filter(p => (p.stock || 100) > 20).length;
-    const lowStock = products.filter(p => (p.stock || 100) > 0 && (p.stock || 100) <= 20).length;
-    const outOfStock = products.filter(p => (p.stock || 100) === 0).length;
-    const totalValue = products.reduce((sum, p) => sum + ((p.price || 0) * (p.stock || 100)), 0);
+    const inStock = items.filter(p => (p.stock || 0) > 20).length;
+    const lowStock = items.filter(p => (p.stock || 0) > 0 && (p.stock || 0) <= 20).length;
+    const outOfStock = items.filter(p => (p.stock || 0) === 0).length;
+    const totalValue = items.reduce((sum, p) => sum + ((p.price || 0) * (p.stock || 0)), 0);
 
-    return { inStock, lowStock, outOfStock, totalValue, total: products.length };
+    return { inStock, lowStock, outOfStock, totalValue, total: items.length };
   };
 
   const stats = getStockStats();
 
   // Filter products based on search and status
   const getFilteredProducts = () => {
-    let filtered = products;
+    let filtered = items;
 
     // Search filter
     if (searchQuery.trim()) {
       filtered = filtered.filter(product =>
-        product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        product.category?.toLowerCase().includes(searchQuery.toLowerCase())
+        (product.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (product.category || '').toLowerCase().includes(searchQuery.toLowerCase())
       );
     }
 
     // Status filter
     if (filterStatus === 'in-stock') {
-      filtered = filtered.filter(p => (p.stock || 100) > 20);
+      filtered = filtered.filter(p => (p.stock || 0) > 20);
     } else if (filterStatus === 'low-stock') {
-      filtered = filtered.filter(p => (p.stock || 100) > 0 && (p.stock || 100) <= 20);
+      filtered = filtered.filter(p => (p.stock || 0) > 0 && (p.stock || 0) <= 20);
     } else if (filterStatus === 'out-of-stock') {
-      filtered = filtered.filter(p => (p.stock || 100) === 0);
+      filtered = filtered.filter(p => (p.stock || 0) === 0);
     }
 
     return filtered.slice(0, 10); // Show top 10
@@ -291,10 +314,10 @@ const ProductsAvailability = () => {
       {/* Footer */}
       {filteredProducts.length > 0 && (
         <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex items-center justify-between">
-          <p className="text-sm text-gray-600">
+          <span className="text-sm text-gray-600">
             Showing <span className="font-semibold">{filteredProducts.length}</span> of{' '}
-            <span className="font-semibold">{products.length}</span> products
-          </p>
+            <span className="font-semibold">{items.length}</span> products
+          </span>
           <button className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-emerald-600 text-white font-semibold rounded-lg transition-all duration-300 shadow-md hover:shadow-lg">
             <span>View All Products</span>
             <ChevronRight size={18} />

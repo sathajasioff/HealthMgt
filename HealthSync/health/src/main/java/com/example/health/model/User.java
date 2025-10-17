@@ -22,4 +22,5 @@ public class User {
     private String password;
 
     private String role;  // "PATIENT", "DOCTOR", or "STAFF"
+    private String imageUrl; // profile image
 }

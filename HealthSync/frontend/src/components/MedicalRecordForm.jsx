@@ -1,4 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import API from '../services/api';
+import { useNotification } from '../context/NotificationContext';
 import { 
   FileText, 
   User, 
@@ -13,6 +15,11 @@ import {
 } from 'lucide-react';
 
 const MedicalRecordForm = ({ patientId, roomId, onClose, onSave }) => {
+  const { showToast } = useNotification();
+  const user = useMemo(() => { try { return JSON.parse(localStorage.getItem('user') || 'null'); } catch { return null; } }, []);
+  const role = user?.role?.toUpperCase?.() || '';
+  const doctorId = user?.id || user?._id;
+  const [resolvedPatientId, setResolvedPatientId] = useState(patientId || '');
   const [formData, setFormData] = useState({
     patientName: '',
     patientAge: '',
@@ -41,6 +48,28 @@ const MedicalRecordForm = ({ patientId, roomId, onClose, onSave }) => {
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+
+  // Load patient details from the current checkup using roomId (video call context)
+  useEffect(() => {
+    const loadFromRoom = async () => {
+      if (!roomId) return;
+      try {
+        const res = await API.get(`/checkups/room/${roomId}`);
+        const c = res.data || null;
+        if (!c) return;
+        setResolvedPatientId(prev => prev || c.patientId || '');
+        setFormData(prev => ({
+          ...prev,
+          patientName: c.patientName || prev.patientName,
+          patientAge: c.patientAge != null ? String(c.patientAge) : prev.patientAge,
+          patientGender: c.patientGender || prev.patientGender,
+        }));
+      } catch (e) {
+        // ignore
+      }
+    };
+    loadFromRoom();
+  }, [roomId]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -102,45 +131,63 @@ const MedicalRecordForm = ({ patientId, roomId, onClose, onSave }) => {
     if (!validateForm()) {
       return;
     }
+    if (role !== 'DOCTOR') {
+      setErrors({ submit: 'Only doctors can submit medical records.' });
+      return;
+    }
     
     setSaving(true);
     
     try {
-      // Simulate API call - replace with actual API endpoint
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      const recordData = {
-        ...formData,
-        patientId,
+      const payload = {
+        patientId: resolvedPatientId || patientId,
+        doctorId,
         roomId,
-        doctorId: localStorage.getItem('userId') || 'doctor_123',
-        createdAt: new Date().toISOString()
+        patientName: formData.patientName,
+        patientAge: formData.patientAge ? parseInt(formData.patientAge, 10) : null,
+        patientGender: formData.patientGender,
+        consultationDate: formData.consultationDate,
+        chiefComplaint: formData.chiefComplaint,
+        symptoms: formData.symptoms,
+        diagnosis: formData.diagnosis,
+        vitalBloodPressure: formData.vitalSigns.bloodPressure,
+        vitalHeartRate: formData.vitalSigns.heartRate,
+        vitalTemperature: formData.vitalSigns.temperature,
+        vitalRespiratoryRate: formData.vitalSigns.respiratoryRate,
+        vitalOxygenSaturation: formData.vitalSigns.oxygenSaturation,
+        medicalHistory: formData.medicalHistory,
+        allergies: formData.allergies,
+        currentMedications: formData.currentMedications,
+        prescribedMedications: formData.prescribedMedications,
+        labTests: formData.labTests,
+        recommendations: formData.recommendations,
+        followUpDate: formData.followUpDate,
+        notes: formData.notes,
       };
-      
-      // Save to localStorage for demo purposes
-      const existingRecords = JSON.parse(localStorage.getItem('medicalRecords') || '[]');
-      existingRecords.push(recordData);
-      localStorage.setItem('medicalRecords', JSON.stringify(existingRecords));
-      
+
+      const res = await API.post('/medical-records', payload);
+      const recordData = res.data;
+
       setSaved(true);
-      
-      if (onSave) {
-        onSave(recordData);
-      }
-      
-      setTimeout(() => {
-        if (onClose) {
-          onClose();
-        }
-      }, 2000);
+      showToast('Medical record saved');
+
+      if (onSave) onSave(recordData);
+      window.dispatchEvent(new Event('medical:updated'));
+
+      setTimeout(() => { if (onClose) onClose(); }, 1500);
       
     } catch (error) {
       console.error('Error saving medical record:', error);
       setErrors({ submit: 'Failed to save medical record. Please try again.' });
+      showToast('Failed to save medical record');
     } finally {
       setSaving(false);
     }
   };
+
+  if (role !== 'DOCTOR') {
+    return null;
+  }
 
   if (saved) {
     return (
@@ -203,7 +250,8 @@ const MedicalRecordForm = ({ patientId, roomId, onClose, onSave }) => {
                   name="patientName"
                   value={formData.patientName}
                   onChange={handleChange}
-                  className={`w-full px-3 py-2 border ${errors.patientName ? 'border-red-500' : 'border-gray-300'} rounded-lg focus:outline-none focus:ring-2 focus:ring-primary`}
+                  readOnly
+                  className={`w-full px-3 py-2 border ${errors.patientName ? 'border-red-500' : 'border-gray-300'} rounded-lg bg-gray-50 text-gray-700`}
                   placeholder="Enter patient name"
                 />
                 {errors.patientName && (
@@ -219,7 +267,8 @@ const MedicalRecordForm = ({ patientId, roomId, onClose, onSave }) => {
                   name="patientAge"
                   value={formData.patientAge}
                   onChange={handleChange}
-                  className={`w-full px-3 py-2 border ${errors.patientAge ? 'border-red-500' : 'border-gray-300'} rounded-lg focus:outline-none focus:ring-2 focus:ring-primary`}
+                  readOnly
+                  className={`w-full px-3 py-2 border ${errors.patientAge ? 'border-red-500' : 'border-gray-300'} rounded-lg bg-gray-50 text-gray-700`}
                   placeholder="Age"
                   min="0"
                   max="150"
@@ -236,7 +285,8 @@ const MedicalRecordForm = ({ patientId, roomId, onClose, onSave }) => {
                   name="patientGender"
                   value={formData.patientGender}
                   onChange={handleChange}
-                  className={`w-full px-3 py-2 border ${errors.patientGender ? 'border-red-500' : 'border-gray-300'} rounded-lg focus:outline-none focus:ring-2 focus:ring-primary`}
+                  disabled
+                  className={`w-full px-3 py-2 border ${errors.patientGender ? 'border-red-500' : 'border-gray-300'} rounded-lg bg-gray-50 text-gray-700`}
                 >
                   <option value="">Select</option>
                   <option value="Male">Male</option>
@@ -313,7 +363,7 @@ const MedicalRecordForm = ({ patientId, roomId, onClose, onSave }) => {
             </div>
           </div>
 
-          {/* Vital Signs */}
+          {/* Vital Signs
           <div className="bg-gray-50 p-4 rounded-lg">
             <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
               <Activity size={20} className="text-primary" />
@@ -386,7 +436,7 @@ const MedicalRecordForm = ({ patientId, roomId, onClose, onSave }) => {
                 />
               </div>
             </div>
-          </div>
+          </div> */}
 
           {/* Medical History */}
           <div className="bg-gray-50 p-4 rounded-lg">

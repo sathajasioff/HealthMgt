@@ -1,13 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { assets } from '../assets/assets'
-import { Wallet, CreditCard, ArrowLeftRight, ChevronDown, User, CheckCircle2, X } from 'lucide-react';
+import API from '../services/api';
+import { Wallet, CreditCard, ArrowLeftRight, ChevronDown, User, CheckCircle2, X, ShieldCheck } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import gsap from 'gsap';
 
 const PaymentGateway = () => {
     const location = useLocation();
     const navigate = useNavigate();
-    const { cart = [], totalPrice = 0 } = location.state || {};
+    const { cart = [], totalPrice = 0, paymentId } = location.state || {};
+    const user = (() => { try { return JSON.parse(localStorage.getItem('user') || 'null'); } catch { return null; } })();
+    const role = user?.role?.toUpperCase?.() || '';
     
     const [selectedMethod, setSelectedMethod] = useState('creditCard');
     const [saveCardInfo, setSaveCardInfo] = useState(false);
@@ -17,6 +20,11 @@ const PaymentGateway = () => {
         shippingAddress: false,
         paymentMethod: true
     });
+    // Insurance state
+    const [insuranceProvider, setInsuranceProvider] = useState('');
+    const [insurancePolicyNumber, setInsurancePolicyNumber] = useState('');
+    const [insuranceMemberId, setInsuranceMemberId] = useState('');
+    const [insuranceFile, setInsuranceFile] = useState(null);
 
     // Refs for GSAP animations
     const containerRef = useRef(null);
@@ -30,7 +38,8 @@ const PaymentGateway = () => {
     const paymentMethods = [
         { id: 'wallet', label: 'Wallet', icon: Wallet },
         { id: 'creditCard', label: 'Credit Card', icon: CreditCard },
-        { id: 'transfer', label: 'Transfer', icon: ArrowLeftRight }
+        { id: 'transfer', label: 'Transfer', icon: ArrowLeftRight },
+        { id: 'insurance', label: 'Insurance', icon: ShieldCheck }
     ];
 
     const cardInfo = {
@@ -49,6 +58,11 @@ const PaymentGateway = () => {
 
     // Initial page load animations
     useEffect(() => {
+        // Prevent pharmacy users from paying
+        if (role === 'PHARMACY') {
+            navigate('/pharmacy-dashboard', { replace: true });
+            return;
+        }
         const ctx = gsap.context(() => {
             // Set initial state
             gsap.set([headerRef.current, summaryRef.current], { opacity: 1 });
@@ -173,7 +187,7 @@ const PaymentGateway = () => {
     };
 
     // Button click animation
-    const handleFinishPayment = (e) => {
+    const handleFinishPayment = async (e) => {
         const button = e.currentTarget;
         
         gsap.to(button, {
@@ -182,8 +196,25 @@ const PaymentGateway = () => {
             yoyo: true,
             repeat: 1,
             ease: 'power2.inOut',
-            onComplete: () => {
-                setShowSuccessModal(true);
+            onComplete: async () => {
+                try {
+                    if (!paymentId) { setShowSuccessModal(true); return; }
+                    if (selectedMethod === 'insurance') {
+                        if (!insuranceFile) { alert('Please upload insurance PDF'); return; }
+                        const fd = new FormData();
+                        fd.append('file', insuranceFile);
+                        if (insuranceProvider) fd.append('provider', insuranceProvider);
+                        if (insurancePolicyNumber) fd.append('policyNumber', insurancePolicyNumber);
+                        if (insuranceMemberId) fd.append('memberId', insuranceMemberId);
+                        await API.put(`/payments/${paymentId}/insurance`, fd);
+                    } else {
+                        const tx = 'TX-' + Math.random().toString(36).slice(2).toUpperCase();
+                        await API.post(`/payments/${paymentId}/paid`, { transactionId: tx });
+                    }
+                } catch (_) {
+                } finally {
+                    setShowSuccessModal(true);
+                }
             }
         });
     };
@@ -240,74 +271,94 @@ const PaymentGateway = () => {
                                 })}
                             </div>
 
-                            {/* Card Selection Text */}
+                            {/* Selection Hint */}
                             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-6">
                                 <p className="text-sm text-blue-800 flex items-center gap-2">
-                                    <CreditCard size={16} />
-                                    <span>Enter your card details securely</span>
+                                    {selectedMethod === 'creditCard' && (<><CreditCard size={16} /><span>Enter your card details securely</span></>)}
+                                    {selectedMethod === 'wallet' && (<><Wallet size={16} /><span>We will deduct from your wallet balance</span></>)}
+                                    {selectedMethod === 'transfer' && (<><ArrowLeftRight size={16} /><span>We will display bank transfer details</span></>)}
+                                    {selectedMethod === 'insurance' && (<><ShieldCheck size={16} /><span>Provide your insurance information</span></>)}
                                 </p>
                             </div>
 
-                            {/* Card Form */}
+                            {/* Method Specific Form */}
                             <div ref={formRef} className="space-y-4">
-                                <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                        Card Number
-                                    </label>
-                                    <input
-                                        type="text"
-                                        className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white transition-all duration-200 hover:border-gray-300"
-                                        placeholder="1234 5678 9012 3456"
-                                        maxLength="19"
-                                    />
-                                </div>
-
-                                <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                        Cardholder Name
-                                    </label>
-                                    <input
-                                        type="text"
-                                        className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white transition-all duration-200 hover:border-gray-300"
-                                        placeholder="John Doe"
-                                    />
-                                </div>
-
-                                <div className="grid grid-cols-2 gap-4">
+                                {selectedMethod === 'insurance' && (
+                                    <div className="space-y-4">
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 mb-2">Insurance Provider</label>
+                                            <input value={insuranceProvider} onChange={(e)=>setInsuranceProvider(e.target.value)} type="text" className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white transition-all duration-200 hover:border-gray-300" placeholder="e.g., ABC Insurance" />
+                                        </div>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="block text-sm font-semibold text-gray-700 mb-2">Policy Number</label>
+                                                <input value={insurancePolicyNumber} onChange={(e)=>setInsurancePolicyNumber(e.target.value)} type="text" className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white transition-all duration-200 hover:border-gray-300" placeholder="POL-XXXX" />
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-semibold text-gray-700 mb-2">Member ID</label>
+                                                <input value={insuranceMemberId} onChange={(e)=>setInsuranceMemberId(e.target.value)} type="text" className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white transition-all duration-200 hover:border-gray-300" placeholder="MEM-XXXX" />
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 mb-2">Upload Insurance PDF</label>
+                                            <input accept="application/pdf" onChange={(e)=>setInsuranceFile(e.target.files?.[0] || null)} type="file" className="w-full text-sm" />
+                                            {insuranceFile && <div className="text-xs text-gray-500 mt-1">{insuranceFile.name}</div>}
+                                        </div>
+                                        <div className="text-xs text-gray-500">We may contact your insurer to verify eligibility.</div>
+                                    </div>
+                                )}
+                                {selectedMethod === 'creditCard' && (
+                                <div className="space-y-4">
                                     <div>
-                                        <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                            Expiry Date
-                                        </label>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">Card Number</label>
                                         <input
                                             type="text"
                                             className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white transition-all duration-200 hover:border-gray-300"
-                                            placeholder="MM/YY"
-                                            maxLength="5"
+                                            placeholder="1234 5678 9012 3456"
+                                            maxLength="19"
                                         />
                                     </div>
                                     <div>
-                                        <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                            CVV
-                                        </label>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">Cardholder Name</label>
                                         <input
-                                            type="password"
+                                            type="text"
                                             className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white transition-all duration-200 hover:border-gray-300"
-                                            placeholder="123"
-                                            maxLength="3"
+                                            placeholder="John Doe"
                                         />
                                     </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 mb-2">Expiry Date</label>
+                                            <input
+                                                type="text"
+                                                className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white transition-all duration-200 hover:border-gray-300"
+                                                placeholder="MM/YY"
+                                                maxLength="5"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 mb-2">CVV</label>
+                                            <input
+                                                type="password"
+                                                className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white transition-all duration-200 hover:border-gray-300"
+                                                placeholder="123"
+                                                maxLength="3"
+                                            />
+                                        </div>
+                                    </div>
                                 </div>
+                            )}
 
-                                <label className="flex items-center space-x-3 pt-2 cursor-pointer group">
-                                    <input
-                                        type="checkbox"
-                                        checked={saveCardInfo}
-                                        onChange={(e) => setSaveCardInfo(e.target.checked)}
-                                        className="w-4 h-4 ml-2 text-primary border-gray-300 rounded focus:ring-green-500 cursor-pointer"
-                                    />
-                                    <span className="text-sm text-gray-700 group-hover:text-gray-900 transition-colors">Save card information for future purchases</span>
-                                </label>
-                            </div>
+                            <label className="flex items-center space-x-3 pt-2 cursor-pointer group">
+                                <input
+                                    type="checkbox"
+                                    checked={saveCardInfo}
+                                    onChange={(e) => setSaveCardInfo(e.target.checked)}
+                                    className="w-4 h-4 ml-2 text-primary border-gray-300 rounded focus:ring-green-500 cursor-pointer"
+                                />
+                                <span className="text-sm text-gray-700 group-hover:text-gray-900 transition-colors">Save card information for future purchases</span>
+                            </label>
+                        </div>
 
                             {/* Action Buttons */}
                             <div className="flex justify-between pt-8 mt-8 border-t border-gray-200">
@@ -428,6 +479,12 @@ const PaymentGateway = () => {
                                                     <>
                                                         <ArrowLeftRight size={16} className="text-gray-500" />
                                                         <span className="text-sm text-gray-600">Transfer</span>
+                                                    </>
+                                                )}
+                                                {selectedMethod === 'insurance' && (
+                                                    <>
+                                                        <ShieldCheck size={16} className="text-gray-500" />
+                                                        <span className="text-sm text-gray-600">Insurance</span>
                                                     </>
                                                 )}
                                             </div>
@@ -567,7 +624,7 @@ const PaymentGateway = () => {
                         <button
                             onClick={() => {
                                 setShowSuccessModal(false);
-                                navigate('/order');
+                                navigate('/orders');
                             }}
                             className="w-full bg-primary hover:bg-emerald-600 text-white font-semibold py-3 px-6 rounded-lg transition-all duration-300 shadow-lg hover:shadow-xl transform hover:scale-105"
                         >

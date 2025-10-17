@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import Sidebar from "../../components/Sidebar";
 import { 
   Video, 
@@ -10,17 +10,30 @@ import {
   Copy, 
   Check
 } from "lucide-react";
+import API from "../../services/api";
+import { useNotification } from "../../context/NotificationContext";
 
 function HomeRoom() {
   const [roomId, setRoomId] = useState("");
   const [copied, setCopied] = useState(false);
   const [token, setToken] = useState(true);
   const navigate = useNavigate();
-  
+  const location = useLocation();
+  const { showToast } = useNotification();
+
+  const user = useMemo(() => {
+    try { return JSON.parse(localStorage.getItem('user') || 'null'); } catch { return null; }
+  }, []);
+  const role = user?.role?.toUpperCase?.() || '';
+  const appointment = location.state?.appointment || null;
+  const checkupId = appointment?.id || appointment?._id;
+
   const handleRoomIdGenerate = () => {
+    if (role !== 'DOCTOR') return; // Patients cannot generate
     const randomId = Math.random().toString(36).substring(2, 9);
     const timestamp = Date.now().toString().slice(-4);
-    setRoomId(randomId + timestamp);
+    const id = randomId + timestamp;
+    setRoomId(id);
     setCopied(false);
   };
 
@@ -47,6 +60,31 @@ function HomeRoom() {
     }
     navigate(`/room/${roomId}?type=group-call`);
   };
+
+  // When arriving with an appointment, preload existing room or restrict gen
+  useEffect(() => {
+    if (appointment?.roomId) {
+      setRoomId(appointment.roomId);
+    }
+  }, [appointment]);
+
+  // Persist generated roomId to backend for this checkup (doctors only)
+  useEffect(() => {
+    const persist = async () => {
+      if (role !== 'DOCTOR') return;
+      if (!checkupId) return;
+      if (!roomId) return;
+      try {
+        await API.put(`/checkups/${checkupId}/room`, { roomId });
+        window.dispatchEvent(new Event('checkups:updated'));
+        showToast('Room link shared with patient');
+      } catch (e) {
+        // fail silently but inform
+        showToast('Failed to share room link');
+      }
+    };
+    persist();
+  }, [roomId, role, checkupId, showToast]);
 
   return (
     <div className="flex min-h-screen font-sans">
@@ -131,8 +169,10 @@ function HomeRoom() {
                 )}
               </div>
               <button 
-                className="px-8 py-4 bg-gradient-to-r from-primary to-green-600 text-white rounded-xl font-semibold flex items-center gap-3 hover:-translate-y-0.5 hover:shadow-xl transition-all shadow-lg whitespace-nowrap group"
+                className="px-8 py-4 bg-gradient-to-r from-primary to-green-600 text-white rounded-xl font-semibold flex items-center gap-3 hover:-translate-y-0.5 hover:shadow-xl transition-all shadow-lg whitespace-nowrap group disabled:opacity-50 disabled:cursor-not-allowed"
                 onClick={handleRoomIdGenerate}
+                disabled={role !== 'DOCTOR'}
+                title={role !== 'DOCTOR' ? 'Only doctors can generate rooms' : 'Generate Room ID'}
               >
                 <div className="w-6 h-6 bg-white/20 rounded-lg flex items-center justify-center group-hover:bg-white/30 transition-colors">
                   <Video size={18} className="text-white" strokeWidth={2.5} />
