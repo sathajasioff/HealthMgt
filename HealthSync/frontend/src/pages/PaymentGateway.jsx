@@ -26,6 +26,12 @@ const PaymentGateway = () => {
     const [insuranceMemberId, setInsuranceMemberId] = useState('');
     const [insuranceFile, setInsuranceFile] = useState(null);
 
+    // Card fields
+    const [cardNumber, setCardNumber] = useState('');
+    const [cardName, setCardName] = useState('');
+    const [cardExpiry, setCardExpiry] = useState('');
+    const [cardCvv, setCardCvv] = useState('');
+
     // Refs for GSAP animations
     const containerRef = useRef(null);
     const headerRef = useRef(null);
@@ -168,6 +174,19 @@ const PaymentGateway = () => {
     // Payment method selection animation
     const handleMethodChange = (methodId) => {
         setSelectedMethod(methodId);
+        // reset method-specific inputs when switching
+        if (methodId !== 'insurance') {
+            setInsuranceProvider('');
+            setInsurancePolicyNumber('');
+            setInsuranceMemberId('');
+            setInsuranceFile(null);
+        }
+        if (methodId !== 'creditCard') {
+            setCardNumber('');
+            setCardName('');
+            setCardExpiry('');
+            setCardCvv('');
+        }
         
         // Animate the selected card
         const selectedCard = document.querySelector(`input[value="${methodId}"]`)?.closest('label');
@@ -186,9 +205,34 @@ const PaymentGateway = () => {
         }
     };
 
+    // Validation helpers
+    const validCardNumber = (val) => val.replace(/\s+/g, '').match(/^\d{16}$/);
+    const validExpiry = (val) => {
+        const m = val.match(/^(0[1-9]|1[0-2])\/(\d{2})$/);
+        if (!m) return false;
+        const mm = parseInt(m[1], 10);
+        const yy = parseInt('20' + m[2], 10);
+        const now = new Date();
+        const exp = new Date(yy, mm, 0);
+        return exp >= new Date(now.getFullYear(), now.getMonth(), 1);
+    };
+    const validCvv = (val) => /^\d{3}$/.test(val);
+
+    const canSubmit = (() => {
+        if (!paymentId) return true;
+        if (selectedMethod === 'creditCard') {
+            return Boolean(validCardNumber(cardNumber) && cardName.trim() && validExpiry(cardExpiry) && validCvv(cardCvv));
+        }
+        if (selectedMethod === 'insurance') {
+            return Boolean(insuranceFile && insuranceProvider.trim() && insurancePolicyNumber.trim());
+        }
+        return true;
+    })();
+
     // Button click animation
     const handleFinishPayment = async (e) => {
         const button = e.currentTarget;
+        if (!canSubmit) return;
         
         gsap.to(button, {
             scale: 0.95,
@@ -200,7 +244,7 @@ const PaymentGateway = () => {
                 try {
                     if (!paymentId) { setShowSuccessModal(true); return; }
                     if (selectedMethod === 'insurance') {
-                        if (!insuranceFile) { alert('Please upload insurance PDF'); return; }
+                        if (!insuranceFile || !insuranceProvider || !insurancePolicyNumber) { return; }
                         const fd = new FormData();
                         fd.append('file', insuranceFile);
                         if (insuranceProvider) fd.append('provider', insuranceProvider);
@@ -313,37 +357,56 @@ const PaymentGateway = () => {
                                         <label className="block text-sm font-semibold text-gray-700 mb-2">Card Number</label>
                                         <input
                                             type="text"
-                                            className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white transition-all duration-200 hover:border-gray-300"
+                                            value={cardNumber}
+                                            onChange={(e)=>{
+                                                const v = e.target.value.replace(/[^\d]/g,'').slice(0,16).replace(/(\d{4})(?=\d)/g,'$1 ');
+                                                setCardNumber(v);
+                                            }}
+                                            className={`w-full px-4 py-3 border-2 rounded-lg focus:outline-none focus:ring-2 bg-white transition-all duration-200 hover:border-gray-300 ${validCardNumber(cardNumber)?'border-gray-200 focus:border-green-500 focus:ring-green-500':'border-red-300 focus:border-red-400 focus:ring-red-400'}`}
                                             placeholder="1234 5678 9012 3456"
                                             maxLength="19"
                                         />
+                                        {!validCardNumber(cardNumber) && cardNumber && (<div className="text-xs text-red-600 mt-1">Enter a valid 16-digit card number</div>)}
                                     </div>
                                     <div>
                                         <label className="block text-sm font-semibold text-gray-700 mb-2">Cardholder Name</label>
                                         <input
                                             type="text"
-                                            className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white transition-all duration-200 hover:border-gray-300"
+                                            value={cardName}
+                                            onChange={(e)=>setCardName(e.target.value)}
+                                            className={`w-full px-4 py-3 border-2 rounded-lg focus:outline-none focus:ring-2 bg-white transition-all duration-200 hover:border-gray-300 ${cardName.trim()? 'border-gray-200 focus:border-green-500 focus:ring-green-500':'border-red-300 focus:border-red-400 focus:ring-red-400'}`}
                                             placeholder="John Doe"
                                         />
+                                        {!cardName.trim() && cardName !== '' && (<div className="text-xs text-red-600 mt-1">Name is required</div>)}
                                     </div>
                                     <div className="grid grid-cols-2 gap-4">
                                         <div>
                                             <label className="block text-sm font-semibold text-gray-700 mb-2">Expiry Date</label>
                                             <input
                                                 type="text"
-                                                className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white transition-all duration-200 hover:border-gray-300"
+                                                value={cardExpiry}
+                                                onChange={(e)=>{
+                                                    let v = e.target.value.replace(/[^\d]/g,'').slice(0,4);
+                                                    if (v.length > 2) v = v.slice(0,2) + '/' + v.slice(2);
+                                                    setCardExpiry(v);
+                                                }}
+                                                className={`w-full px-4 py-3 border-2 rounded-lg focus:outline-none focus:ring-2 bg-white transition-all duration-200 hover:border-gray-300 ${validExpiry(cardExpiry)?'border-gray-2 00 focus:border-green-500 focus:ring-green-500':'border-red-300 focus:border-red-400 focus:ring-red-400'}`}
                                                 placeholder="MM/YY"
                                                 maxLength="5"
                                             />
+                                            {!validExpiry(cardExpiry) && cardExpiry && (<div className="text-xs text-red-600 mt-1">Enter a valid future date</div>)}
                                         </div>
                                         <div>
                                             <label className="block text-sm font-semibold text-gray-700 mb-2">CVV</label>
                                             <input
                                                 type="password"
-                                                className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white transition-all duration-200 hover:border-gray-300"
+                                                value={cardCvv}
+                                                onChange={(e)=>setCardCvv(e.target.value.replace(/[^\d]/g,'').slice(0,3))}
+                                                className={`w-full px-4 py-3 border-2 rounded-lg focus:outline-none focus:ring-2 bg-white transition-all duration-200 hover:border-gray-300 ${validCvv(cardCvv)?'border-gray-200 focus:border-green-500 focus:ring-green-500':'border-red-300 focus:border-red-400 focus:ring-red-400'}`}
                                                 placeholder="123"
                                                 maxLength="3"
                                             />
+                                            {!validCvv(cardCvv) && cardCvv && (<div className="text-xs text-red-600 mt-1">Enter 3-digit CVV</div>)}
                                         </div>
                                     </div>
                                 </div>
@@ -370,7 +433,8 @@ const PaymentGateway = () => {
                                 </button>
                                 <button 
                                     onClick={handleFinishPayment}
-                                    className="px-8 py-3 bg-primary text-white rounded-lg hover:bg-emerald-600 transition-all duration-300 font-medium shadow-lg hover:shadow-xl flex items-center gap-2"
+                                    disabled={!canSubmit}
+                                    className={`px-8 py-3 rounded-lg transition-all duration-300 font-medium shadow-lg flex items-center gap-2 ${canSubmit ? 'bg-primary text-white hover:bg-emerald-600 hover:shadow-xl' : 'bg-gray-300 text-gray-600 cursor-not-allowed'}`}
                                 >
                                     <span>Finish Payment</span>
                                 </button>

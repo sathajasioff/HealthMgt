@@ -16,6 +16,13 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.http.MediaType;
 import org.springframework.web.multipart.MultipartFile;
 
+import org.springframework.validation.annotation.Validated;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
+
 import com.example.health.model.Payment;
 import com.example.health.service.PaymentService;
 
@@ -25,6 +32,7 @@ import lombok.RequiredArgsConstructor;
 @RequestMapping("/api/payments")
 @CrossOrigin(origins = {"http://localhost:3000", "http://localhost:5173"})
 @RequiredArgsConstructor
+@Validated
 public class PaymentController {
 
     private final PaymentService paymentService;
@@ -39,7 +47,7 @@ public class PaymentController {
     }
 
     @PostMapping("/manual")
-    public ResponseEntity<Payment> createManual(@RequestBody ManualBody body) {
+    public ResponseEntity<Payment> createManual(@Valid @RequestBody ManualBody body) {
         return ResponseEntity.ok(
             paymentService.createManualOrder(
                 body.getPatientId(),
@@ -79,6 +87,7 @@ public class PaymentController {
         pay.setDeliveryFee(0.0);
         pay.setGrandTotal(0.0);
         // Persist before marking paid
+        paymentService.save(pay);
         // Reuse markPaid to set status, transaction and paidAt
         paymentService.markPaid(paymentId, "INS-" + System.currentTimeMillis());
         return ResponseEntity.ok(paymentService.findById(paymentId));
@@ -101,10 +110,17 @@ public class PaymentController {
 
     // Request body for manual order creation
     public static class ManualBody {
+        @NotBlank
         private String patientId;
+        @NotBlank
         private String pharmacyId;
+        @NotNull
+        @Size(min = 1)
         private java.util.List<com.example.health.model.Prescription.Item> items;
+        @NotBlank
+        @Pattern(regexp = "wallet|creditCard|transfer|insurance")
         private String method;
+        @NotBlank
         private String deliveryMethod;
 
         public String getPatientId() { return patientId; }

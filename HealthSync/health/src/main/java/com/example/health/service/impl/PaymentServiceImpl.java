@@ -27,6 +27,10 @@ public class PaymentServiceImpl implements PaymentService {
     @Override
     public Payment createFromPrescription(String prescriptionId, String method, String deliveryMethod) {
         Prescription p = prescriptionRepository.findById(prescriptionId).orElseThrow(() -> new RuntimeException("Prescription not found"));
+        String normalizedMethod = method == null ? "creditCard" : method;
+        if (!normalizedMethod.matches("wallet|creditCard|transfer|insurance")) {
+            normalizedMethod = "creditCard";
+        }
         Payment pay = Payment.builder()
             .prescriptionId(p.getId())
             .patientId(p.getPatientId())
@@ -39,7 +43,7 @@ public class PaymentServiceImpl implements PaymentService {
             .currency(p.getCurrency())
             .billNumber(p.getBillNumber())
             .status("Pending")
-            .method(method)
+            .method(normalizedMethod)
             .createdAt(Instant.now())
             .build();
         return paymentRepository.save(pay);
@@ -117,6 +121,11 @@ public class PaymentServiceImpl implements PaymentService {
         double delivery = 0.0;
         double grand = subtotal + tax + delivery;
 
+        String normalizedMethod = method == null ? "creditCard" : method;
+        if (!normalizedMethod.matches("wallet|creditCard|transfer|insurance")) {
+            normalizedMethod = "creditCard";
+        }
+
         Payment pay = Payment.builder()
             .prescriptionId(null)
             .patientId(patientId)
@@ -129,7 +138,7 @@ public class PaymentServiceImpl implements PaymentService {
             .currency("LKR")
             .billNumber("BILL-" + System.currentTimeMillis())
             .status("Pending")
-            .method(method == null ? "card" : method)
+            .method(normalizedMethod)
             .createdAt(Instant.now())
             .build();
         return paymentRepository.save(pay);
