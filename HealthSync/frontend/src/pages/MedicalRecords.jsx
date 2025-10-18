@@ -2,6 +2,9 @@ import React, { useState, useEffect } from 'react';
 import Sidebar from '../components/Sidebar';
 import Header from '../components/Header';
 import MedicalRecordForm from '../components/MedicalRecordForm';
+import Logo from '../assets/LogoWHITE.png';
+import API from '../services/api';
+import { useLocation } from 'react-router-dom';
 import { 
   FileText, 
   Plus, 
@@ -25,20 +28,93 @@ const MedicalRecords = () => {
   const [filteredRecords, setFilteredRecords] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedRecord, setSelectedRecord] = useState(null);
+  const [patientListModal, setPatientListModal] = useState({ open: false, patientName: '', patientId: '', items: [] });
   const [filterDate, setFilterDate] = useState('');
+  const location = useLocation();
+  const user = (() => { try { return JSON.parse(localStorage.getItem('user') || 'null'); } catch { return null; } })();
+  const role = user?.role?.toUpperCase?.() || '';
+  const userId = user?.id || user?._id;
+  const [conditionReports, setConditionReports] = useState([]);
+  const [loadingCR, setLoadingCR] = useState(false);
+
+  // Normalize backend records to UI shape used by the page/modals
+  const transformRecord = (rec) => {
+    if (!rec) return rec;
+    // If already normalized, return as-is
+    if (rec.vitalSigns && typeof rec.vitalSigns === 'object') return rec;
+    return {
+      ...rec,
+      vitalSigns: {
+        bloodPressure: rec.vitalBloodPressure || rec?.vitals?.bloodPressure || '',
+        heartRate: rec.vitalHeartRate || rec?.vitals?.heartRate || '',
+        temperature: rec.vitalTemperature || rec?.vitals?.temperature || '',
+        respiratoryRate: rec.vitalRespiratoryRate || rec?.vitals?.respiratoryRate || '',
+        oxygenSaturation: rec.vitalOxygenSaturation || rec?.vitals?.oxygenSaturation || '',
+      },
+    };
+  };
 
   useEffect(() => {
     loadRecords();
   }, []);
 
   useEffect(() => {
+    const loadCR = async () => {
+      const pid = user?.id || user?._id || user?.userId;
+      if (role !== 'PATIENT' || !pid) { setConditionReports([]); return; }
+      try {
+        setLoadingCR(true);
+        const res = await API.get(`/condition-reports`, { 
+          params: { patientId: pid },
+          headers: { 'X-User-Role': role, 'X-User-Id': pid }
+        });
+        const list = Array.isArray(res?.data) ? res.data : [];
+        setConditionReports(list);
+      } catch (_) {
+        setConditionReports([]);
+      } finally {
+        setLoadingCR(false);
+      }
+    };
+    loadCR();
+    const onUpd = () => loadCR();
+    window.addEventListener('dispatch:updated', onUpd);
+    return () => window.removeEventListener('dispatch:updated', onUpd);
+  }, [role, userId]);
+
+  useEffect(() => {
+    const handler = () => loadRecords();
+    window.addEventListener('medical:updated', handler);
+    return () => window.removeEventListener('medical:updated', handler);
+  }, []);
+
+  useEffect(() => {
     filterRecords();
   }, [searchTerm, filterDate, records]);
 
-  const loadRecords = () => {
-    const savedRecords = JSON.parse(localStorage.getItem('medicalRecords') || '[]');
-    setRecords(savedRecords);
-    setFilteredRecords(savedRecords);
+  const loadRecords = async () => {
+    try {
+      const params = new URLSearchParams(location.search);
+      const roomId = params.get('roomId');
+      let data = [];
+      if (roomId) {
+        const res = await API.get(`/medical-records/room/${roomId}`);
+        data = Array.isArray(res.data) ? res.data.map(transformRecord) : [];
+      } else if (role === 'PATIENT') {
+        const res = await API.get(`/medical-records/patient/${userId}`);
+        data = Array.isArray(res.data) ? res.data.map(transformRecord) : [];
+      } else if (role === 'DOCTOR') {
+        const res = await API.get(`/medical-records/doctor/${userId}`);
+        data = Array.isArray(res.data) ? res.data.map(transformRecord) : [];
+      } else {
+        data = [];
+      }
+      setRecords(data);
+      setFilteredRecords(data);
+    } catch (e) {
+      setRecords([]);
+      setFilteredRecords([]);
+    }
   };
 
   const filterRecords = () => {
@@ -70,66 +146,157 @@ const MedicalRecords = () => {
     setSelectedRecord(record);
   };
 
-  const handleDownloadRecord = (record) => {
-    const recordText = `
-MEDICAL RECORD
-==============
+  const handleViewPatientRecords = async (record) => {
+    try {
+      const pid = record.patientId || '';
+      let items = [];
+      if (pid) {
+        const res = await API.get(`/medical-records/patient/${pid}`);
+        items = Array.isArray(res.data) ? res.data.map(transformRecord) : [];
+      } else {
+        items = records.filter(r => r.patientName === record.patientName).map(transformRecord);
+      }
+      setPatientListModal({ open: true, patientName: record.patientName, patientId: pid, items });
+    } catch (e) {
+      setPatientListModal({ open: true, patientName: record.patientName, patientId: record.patientId || '', items: [] });
+    }
+  };
 
-Patient Information:
-- Name: ${record.patientName}
-- Age: ${record.patientAge}
-- Gender: ${record.patientGender}
-- Date: ${record.consultationDate}
+  // Dynamically load a script if needed
+  const loadScript = (src) => new Promise((resolve, reject) => {
+    if (document.querySelector(`script[src="${src}"]`)) return resolve();
+    const s = document.createElement('script');
+    s.src = src;
+    s.async = true;
+    s.onload = resolve;
+    s.onerror = reject;
+    document.body.appendChild(s);
+  });
 
-Chief Complaint:
-${record.chiefComplaint}
+  const handleDownloadRecord = async (record) => {
+    try {
+      // Load libraries on demand from CDN (no npm install required)
+      await loadScript('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js');
+      await loadScript('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js');
 
-Symptoms:
-${record.symptoms || 'N/A'}
+      const container = document.createElement('div');
+      container.style.position = 'fixed';
+      container.style.left = '-10000px';
+      container.style.top = '0';
+      container.style.width = '800px';
+      container.style.background = '#ffffff';
+      container.style.padding = '0';
+      container.innerHTML = `
+        <div style="font-family: Arial, sans-serif; color:#333;">
+          <div style="background: linear-gradient(135deg, #14b8a6 0%, #0d9488 100%); color:#fff; padding:24px; text-align:center;">
+            <div style="font-size:28px; font-weight:700;">HealthSync</div>
+            <div style="font-size:14px; opacity:.9;">Medical Record Document</div>
+          </div>
+          <div style="padding:24px;">
+            <div style="margin-bottom:16px; border-bottom:2px solid #e5e7eb; padding-bottom:12px; color:#14b8a6; font-weight:700;">Patient Information</div>
+            <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:12px;">
+              <div style="background:#f9fafb; padding:10px; border-radius:8px;">
+                <div style="font-size:12px; color:#6b7280; font-weight:600;">Full Name</div>
+                <div style="font-size:14px; color:#111827; font-weight:500;">${record.patientName}</div>
+              </div>
+              <div style="background:#f9fafb; padding:10px; border-radius:8px;">
+                <div style="font-size:12px; color:#6b7280; font-weight:600;">Age</div>
+                <div style="font-size:14px; color:#111827; font-weight:500;">${record.patientAge} years</div>
+              </div>
+              <div style="background:#f9fafb; padding:10px; border-radius:8px;">
+                <div style="font-size:12px; color:#6b7280; font-weight:600;">Gender</div>
+                <div style="font-size:14px; color:#111827; font-weight:500;">${record.patientGender}</div>
+              </div>
+            </div>
 
-Vital Signs:
-- Blood Pressure: ${record.vitalSigns.bloodPressure || 'N/A'}
-- Heart Rate: ${record.vitalSigns.heartRate || 'N/A'}
-- Temperature: ${record.vitalSigns.temperature || 'N/A'}
-- Respiratory Rate: ${record.vitalSigns.respiratoryRate || 'N/A'}
-- O2 Saturation: ${record.vitalSigns.oxygenSaturation || 'N/A'}
+            <div style="margin-top:20px; margin-bottom:16px; border-bottom:2px solid #e5e7eb; padding-bottom:12px; color:#14b8a6; font-weight:700;">Chief Complaint & Symptoms</div>
+            <div style="background:#f9fafb; padding:10px; border-radius:8px; margin-bottom:10px;">
+              <div style="font-size:12px; color:#6b7280; font-weight:600;">Chief Complaint</div>
+              <div style="font-size:14px; color:#111827; font-weight:500;">${record.chiefComplaint}</div>
+            </div>
+            ${record.symptoms ? `
+            <div style="background:#f9fafb; padding:10px; border-radius:8px;">
+              <div style="font-size:12px; color:#6b7280; font-weight:600;">Symptoms</div>
+              <div style="font-size:14px; color:#111827; font-weight:500;">${record.symptoms}</div>
+            </div>` : ''}
 
-Medical History:
-${record.medicalHistory || 'N/A'}
+            ${record.vitalSigns && Object.values(record.vitalSigns).some(v => v) ? `
+            <div style="margin-top:20px; margin-bottom:16px; border-bottom:2px solid #e5e7eb; padding-bottom:12px; color:#14b8a6; font-weight:700;">Vital Signs</div>
+            <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:12px;">
+              ${record.vitalSigns.bloodPressure ? `<div style=\"background:#f9fafb; padding:10px; border-radius:8px;\"><div style=\"font-size:12px; color:#6b7280; font-weight:600;\">Blood Pressure</div><div style=\"font-size:14px; color:#111827; font-weight:500;\">${record.vitalSigns.bloodPressure}</div></div>` : ''}
+              ${record.vitalSigns.heartRate ? `<div style=\"background:#f9fafb; padding:10px; border-radius:8px;\"><div style=\"font-size:12px; color:#6b7280; font-weight:600;\">Heart Rate</div><div style=\"font-size:14px; color:#111827; font-weight:500;\">${record.vitalSigns.heartRate} bpm</div></div>` : ''}
+              ${record.vitalSigns.temperature ? `<div style=\"background:#f9fafb; padding:10px; border-radius:8px;\"><div style=\"font-size:12px; color:#6b7280; font-weight:600;\">Temperature</div><div style=\"font-size:14px; color:#111827; font-weight:500;\">${record.vitalSigns.temperature}°F</div></div>` : ''}
+              ${record.vitalSigns.respiratoryRate ? `<div style=\"background:#f9fafb; padding:10px; border-radius:8px;\"><div style=\"font-size:12px; color:#6b7280; font-weight:600;\">Respiratory Rate</div><div style=\"font-size:14px; color:#111827; font-weight:500;\">${record.vitalSigns.respiratoryRate} /min</div></div>` : ''}
+              ${record.vitalSigns.oxygenSaturation ? `<div style=\"background:#f9fafb; padding:10px; border-radius:8px;\"><div style=\"font-size:12px; color:#6b7280; font-weight:600;\">O2 Saturation</div><div style=\"font-size:14px; color:#111827; font-weight:500;\">${record.vitalSigns.oxygenSaturation}%</div></div>` : ''}
+            </div>` : ''}
 
-Allergies:
-${record.allergies || 'N/A'}
+            ${(record.medicalHistory || record.allergies) ? `
+              <div style=\"margin-top:20px; margin-bottom:16px; border-bottom:2px solid #e5e7eb; padding-bottom:12px; color:#14b8a6; font-weight:700;\">Medical History</div>
+              ${record.medicalHistory ? `<div style=\"background:#f9fafb; padding:10px; border-radius:8px; margin-bottom:10px;\"><div style=\"font-size:12px; color:#6b7280; font-weight:600;\">Medical History</div><div style=\"font-size:14px; color:#111827; font-weight:500;\">${record.medicalHistory}</div></div>` : ''}
+              ${record.allergies ? `<div style=\"background:#f9fafb; padding:10px; border-radius:8px;\"><div style=\"font-size:12px; color:#6b7280; font-weight:600;\">Allergies</div><div style=\"font-size:14px; color:#111827; font-weight:500;\">${record.allergies}</div></div>` : ''}
+            ` : ''}
 
-Diagnosis:
-${record.diagnosis}
+            <div style="margin-top:20px; margin-bottom:16px; border-bottom:2px solid #e5e7eb; padding-bottom:12px; color:#14b8a6; font-weight:700;">Diagnosis</div>
+            <div style="background:#f9fafb; padding:10px; border-radius:8px; margin-bottom:10px;">
+              <div style="font-size:12px; color:#6b7280; font-weight:600;">Primary Diagnosis</div>
+              <div style="font-size:14px; color:#111827; font-weight:500;">${record.diagnosis}</div>
+            </div>
 
-Current Medications:
-${record.currentMedications || 'N/A'}
+            ${(record.currentMedications || record.prescribedMedications || record.labTests) ? `
+              <div style=\"margin-top:20px; margin-bottom:16px; border-bottom:2px solid #e5e7eb; padding-bottom:12px; color:#14b8a6; font-weight:700;\">Medications & Treatment</div>
+              ${record.currentMedications ? `<div style=\"background:#f9fafb; padding:10px; border-radius:8px; margin-bottom:10px;\"><div style=\"font-size:12px; color:#6b7280; font-weight:600;\">Current Medications</div><div style=\"font-size:14px; color:#111827; font-weight:500;\">${record.currentMedications}</div></div>` : ''}
+              ${record.prescribedMedications ? `<div style=\"background:#f9fafb; padding:10px; border-radius:8px; margin-bottom:10px;\"><div style=\"font-size:12px; color:#6b7280; font-weight:600;\">Prescribed Medications</div><div style=\"font-size:14px; color:#111827; font-weight:500;\">${record.prescribedMedications}</div></div>` : ''}
+              ${record.labTests ? `<div style=\"background:#f9fafb; padding:10px; border-radius:8px;\"><div style=\"font-size:12px; color:#6b7280; font-weight:600;\">Lab Tests Ordered</div><div style=\"font-size:14px; color:#111827; font-weight:500;\">${record.labTests}</div></div>` : ''}
+            ` : ''}
 
-Prescribed Medications:
-${record.prescribedMedications || 'N/A'}
+            ${(record.recommendations || record.notes || record.followUpDate) ? `
+              <div style=\"margin-top:20px; margin-bottom:16px; border-bottom:2px solid #e5e7eb; padding-bottom:12px; color:#14b8a6; font-weight:700;\">Recommendations & Follow-up</div>
+              ${record.recommendations ? `<div style=\"background:#f9fafb; padding:10px; border-radius:8px; margin-bottom:10px;\"><div style=\"font-size:12px; color:#6b7280; font-weight:600;\">Recommendations</div><div style=\"font-size:14px; color:#111827; font-weight:500;\">${record.recommendations}</div></div>` : ''}
+              ${record.notes ? `<div style=\"background:#f9fafb; padding:10px; border-radius:8px; margin-bottom:10px;\"><div style=\"font-size:12px; color:#6b7280; font-weight:600;\">Additional Notes</div><div style=\"font-size:14px; color:#111827; font-weight:500;\">${record.notes}</div></div>` : ''}
+              ${record.followUpDate ? `<div style=\"background:#f9fafb; padding:10px; border-radius:8px;\"><div style=\"font-size:12px; color:#6b7280; font-weight:600;\">Follow-up Date</div><div style=\"font-size:14px; color:#111827; font-weight:500;\">${new Date(record.followUpDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</div></div>` : ''}
+            ` : ''}
+          </div>
 
-Lab Tests:
-${record.labTests || 'N/A'}
+          <div style="background:#f9fafb; padding:16px; text-align:center; font-size:12px; color:#6b7280; border-top:2px solid #e5e7eb;">
+            <div><strong>HealthSync Medical Records</strong></div>
+            <div>This is a computer-generated document and does not require a signature.</div>
+            <div>Generated on: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
+          </div>
+        </div>
+      `;
 
-Recommendations:
-${record.recommendations || 'N/A'}
+      document.body.appendChild(container);
+      const canvas = await window.html2canvas(container, { scale: 2, useCORS: true });
+      document.body.removeChild(container);
 
-Additional Notes:
-${record.notes || 'N/A'}
+      const imgData = canvas.toDataURL('image/png');
+      const { jsPDF } = window.jspdf;
+      const pdf = new jsPDF('p', 'pt', 'a4');
 
-Follow-up Date: ${record.followUpDate || 'N/A'}
-    `;
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const imgWidth = pageWidth;
+      const imgHeight = canvas.height * (imgWidth / canvas.width);
 
-    const blob = new Blob([recordText], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `medical_record_${record.patientName.replace(/\s+/g, '_')}_${record.consultationDate}.txt`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+      let heightLeft = imgHeight;
+      let position = 0;
+
+      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+      heightLeft -= pageHeight;
+
+      while (heightLeft > 0) {
+        position = heightLeft - imgHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+        heightLeft -= pageHeight;
+      }
+
+      const filename = `medical_record_${(record.patientName || 'patient').replace(/\s+/g, '_')}_${record.consultationDate}.pdf`;
+      pdf.save(filename);
+    } catch (err) {
+      console.error('PDF generation failed', err);
+      alert('Failed to generate PDF');
+    }
   };
 
   return (
@@ -152,13 +319,15 @@ Follow-up Date: ${record.followUpDate || 'N/A'}
                   <p className="text-gray-600 mt-1">Manage patient medical records and consultations</p>
                 </div>
               </div>
-              <button
-                onClick={() => setShowForm(true)}
-                className="bg-primary text-white px-6 py-3 rounded-lg hover:bg-green-600 transition-colors flex items-center gap-2 font-medium shadow-md"
-              >
-                <Plus size={20} />
-                New Record
-              </button>
+              {role === 'DOCTOR' && (
+                <button
+                  onClick={() => setShowForm(true)}
+                  className="bg-primary text-white px-6 py-3 rounded-lg hover:bg-green-600 transition-colors flex items-center gap-2 font-medium shadow-md"
+                >
+                  <Plus size={20} />
+                  New Record
+                </button>
+              )}
             </div>
           </div>
 
@@ -214,6 +383,36 @@ Follow-up Date: ${record.followUpDate || 'N/A'}
               </div>
             )}
           </div>
+
+          {/* Paramedic Condition Reports (Patient) */}
+          {role === 'PATIENT' && (
+            <div className="bg-white rounded-lg shadow-md p-6 mb-6">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-3">
+                  <div className="bg-sky-100 p-2 rounded-lg"><Activity className="text-sky-700" size={20} /></div>
+                  <h2 className="text-xl font-semibold text-gray-800">Paramedic Condition Reports</h2>
+                </div>
+                {loadingCR && <span className="text-sm text-gray-500">Loading...</span>}
+              </div>
+              {(!conditionReports || conditionReports.length === 0) ? (
+                <div className="text-sm text-gray-600">No condition reports yet.</div>
+              ) : (
+                <div className="space-y-2">
+                  {conditionReports.map((r, idx) => (
+                    <div key={(r.id||r._id||idx)+':cr'} className="border rounded p-3 text-sm text-gray-700">
+                      <div className="text-gray-500 text-xs">{r.createdAt ? new Date(r.createdAt).toLocaleString() : ''}</div>
+                      <div className="mt-1">Vitals: BP {r.bpSystolic??'—'}/{r.bpDiastolic??'—'}, Pulse {r.pulse??'—'} bpm, Resp {r.respRate??'—'} rpm, SpO2 {r.spo2??'—'}%, Temp {r.temperature??'—'}°C</div>
+                      <div>Consciousness: {r.consciousnessLevel || '—'} • Pain: {r.painScale ?? '—'}</div>
+                      <div>Allergies: {r.allergies || '—'}</div>
+                      <div>Medications Given: {r.medicationsGiven || '—'}</div>
+                      <div>Injuries: {r.injuries || '—'}</div>
+                      {r.notes && <div className="text-gray-600">Notes: {r.notes}</div>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Records List */}
           <div className="space-y-4">
@@ -293,7 +492,7 @@ Follow-up Date: ${record.followUpDate || 'N/A'}
                       
                       <div className="flex gap-2 ml-4">
                         <button
-                          onClick={() => handleViewRecord(record)}
+                          onClick={() => handleViewPatientRecords(record)}
                           className="p-2 text-primary hover:bg-green-50 rounded-lg transition-colors"
                           title="View Details"
                         >
@@ -315,6 +514,65 @@ Follow-up Date: ${record.followUpDate || 'N/A'}
           </div>
         </div>
       </div>
+
+      {/* Patient Records List Modal */}
+      {patientListModal.open && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-2xl w-full max-w-3xl my-8">
+            <div className="bg-gradient-to-r from-primary to-primary text-white px-6 py-4 rounded-t-lg flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <FileText size={24} />
+                <div>
+                  <h2 className="text-xl font-bold">Records for {patientListModal.patientName}</h2>
+                  {patientListModal.items?.length >= 0 && (
+                    <p className="text-green-100 text-sm">{patientListModal.items.length} record(s)</p>
+                  )}
+                </div>
+              </div>
+              <button
+                onClick={() => setPatientListModal({ open: false, patientName: '', patientId: '', items: [] })}
+                className="text-white hover:bg-green-700 rounded-full p-2 transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="p-6 max-h-[calc(100vh-240px)] overflow-y-auto">
+              {patientListModal.items.length === 0 ? (
+                <div className="text-center text-gray-600 py-12">No records found for this patient.</div>
+              ) : (
+                <div className="space-y-3">
+                  {patientListModal.items.map((item, i) => (
+                    <div key={i} className="border rounded-lg p-4 flex items-start justify-between hover:bg-gray-50">
+                      <div className="space-y-1">
+                        <div className="text-gray-900 font-semibold">{item.diagnosis}</div>
+                        <div className="text-sm text-gray-600">Consultation: {new Date(item.consultationDate).toLocaleDateString()}</div>
+                        {item.chiefComplaint && (
+                          <div className="text-sm text-gray-700 line-clamp-2">{item.chiefComplaint}</div>
+                        )}
+                      </div>
+                      <div className="flex gap-2 ml-4">
+                        <button
+                          onClick={() => handleDownloadRecord(item)}
+                          className="px-3 py-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors text-sm font-medium"
+                        >
+                          Download
+                        </button>
+                        <button
+                          onClick={() => { setSelectedRecord(item); setPatientListModal({ open: false, patientName: '', patientId: '', items: [] }); }}
+                          className="px-3 py-2 text-primary hover:bg-green-50 rounded-lg transition-colors text-sm font-medium"
+                        >
+                          View
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Medical Record Form Modal */}
       {showForm && (

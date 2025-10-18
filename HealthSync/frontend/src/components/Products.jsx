@@ -1,10 +1,17 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { products, assets } from '../assets/assets';
+import { useLocation, useNavigate } from 'react-router-dom';
+import API from '../services/api';
 import { Search, X, Filter, SlidersHorizontal, Sparkles, ShoppingCart, Download, FileText } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
 
 const Products = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const quoteContext = location.state?.quoteContext;
+  const quoteMode = !!quoteContext; // true if pharmacy came from dashboard to create a quote
+  const user = (() => { try { return JSON.parse(localStorage.getItem('user') || 'null'); } catch { return null; } })();
+  const role = user?.role?.toUpperCase?.() || '';
+  const isPharmacyRole = role === 'PHARMACY';
   const [activeTab, setActiveTab] = useState('PRODUCTS');
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchFocused, setIsSearchFocused] = useState(false);
@@ -12,6 +19,7 @@ const Products = () => {
   const [recentSearches, setRecentSearches] = useState([]);
   const [showFilters, setShowFilters] = useState(false);
   const [cart, setCart] = useState([]);
+  const [dynamicProducts, setDynamicProducts] = useState([]); // backend products in quote mode
   const [showCart, setShowCart] = useState(false);
   const [notification, setNotification] = useState(null);
   const searchInputRef = useRef(null);
@@ -35,6 +43,56 @@ const Products = () => {
       setRecentSearches(JSON.parse(saved));
     }
   }, []);
+
+  // Load active products from backend for pharmacy in quote mode
+  useEffect(() => {
+    const loadBackendProducts = async () => {
+      if (!quoteMode || !quoteContext?.pharmacyId) return;
+      try {
+        const res = await API.get(`/products/pharmacy/${quoteContext.pharmacyId}/active`);
+        const base = API.defaults.baseURL.replace(/\/$/, '');
+        setDynamicProducts(Array.isArray(res.data) ? res.data.map(p => ({
+          id: p.id || p._id,
+          name: p.name,
+          dosageForm: p.dosageForm,
+          strength: p.strength,
+          price: p.price || 0,
+          image: `${base}/products/${p.id || p._id}/image?ts=${Date.now()}`,
+          pharmacyId: p.pharmacyId,
+          // Only required fields exposed to UI
+        })) : []);
+      } catch (_) {
+        setDynamicProducts([]);
+      }
+    };
+    loadBackendProducts();
+  }, [quoteMode, quoteContext?.pharmacyId]);
+
+  // Load active products globally when not in quote mode
+  useEffect(() => {
+    const loadAllActive = async () => {
+      if (quoteMode) return; // handled by the other effect
+      try {
+        const res = await API.get('/products/active');
+        const base = API.defaults.baseURL.replace(/\/$/, '');
+        setDynamicProducts(Array.isArray(res.data) ? res.data.map(p => ({
+          id: p.id || p._id,
+          name: p.name,
+          dosageForm: p.dosageForm,
+          strength: p.strength,
+          price: p.price || 0,
+          image: `${base}/products/${p.id || p._id}/image?ts=${Date.now()}`,
+          pharmacyId: p.pharmacyId,
+        })) : []);
+      } catch (_) {
+        setDynamicProducts([]);
+      }
+    };
+    loadAllActive();
+  }, [quoteMode]);
+
+  // Catalog helper: use backend products only
+  const catalog = () => dynamicProducts;
 
   // Close filter dropdown when clicking outside
   useEffect(() => {
@@ -336,7 +394,7 @@ const Products = () => {
     if (!searchQuery.trim()) return [];
 
     const query = searchQuery.toLowerCase();
-    return products
+    return catalog()
       .filter(product =>
         product.name.toLowerCase().includes(query) ||
         product.category?.toLowerCase().includes(query)
@@ -352,23 +410,16 @@ const Products = () => {
 
   // Filter products based on search query, active tab, and filters
   const getFilteredProducts = () => {
-    let filtered = products;
+    let filtered = catalog();
 
     // Search filter
     if (searchQuery.trim()) {
       filtered = filtered.filter(product =>
-        product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        product.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        product.category?.toLowerCase().includes(searchQuery.toLowerCase())
+        (product.name || '').toLowerCase().includes(searchQuery.toLowerCase())
       );
     }
 
-    // Tab filter
-    if (activeTab === 'MEDICINES') {
-      filtered = filtered.filter(product => product.category === 'medicine');
-    } else if (activeTab === 'BEST RATED') {
-      filtered = filtered.filter(product => product.rating >= 4);
-    }
+    // Tab filter is skipped for DB-backed list (no category/rating fields needed)
 
     // Price range filter
     filtered = filtered.filter(product => {
@@ -401,6 +452,76 @@ const Products = () => {
   };
 
   const filteredProducts = getFilteredProducts();
+
+  // Manual checkout for patients (non-quote mode)
+  const checkoutManual = async () => {
+    if (quoteMode || isPharmacyRole) return;
+    if (!cart.length) {
+      setShowCart(false);
+      return;
+    }
+    const uid = user?.id || user?._id;
+    if (!uid) {
+      setShowCart(false);
+      setNotification('Please sign in to place order');
+      return;
+    }
+    const pharmacyId = cart[0].pharmacyId;
+    const samePharmacy = cart.every(it => it.pharmacyId === pharmacyId);
+    if (!samePharmacy) {
+      setNotification('All items must be from the same pharmacy');
+      return;
+    }
+    try {
+      const items = cart.map(it => ({
+        productId: it.id,
+        medicineName: it.name,
+        dosage: [it.strength, it.dosageForm].filter(Boolean).join(' '),
+        quantity: it.quantity || 1,
+        unitPrice: it.price || 0,
+      }));
+      const createRes = await API.post('/payments/manual', {
+        patientId: uid,
+        pharmacyId,
+        method: 'card',
+        deliveryMethod: 'home',
+        items,
+      });
+      const payment = createRes?.data;
+      if (payment?.id || payment?._id) {
+        const pid = payment.id || payment._id;
+        await API.post(`/payments/${pid}/paid`, { transactionId: `WEB-${Date.now()}` });
+      }
+      setCart([]);
+      setShowCart(false);
+      showNotification('Order placed successfully');
+    } catch (e) {
+      setNotification('Failed to place order');
+    }
+  };
+
+  // Send quote from cart items (quote mode only)
+  const sendQuote = async () => {
+    if (!quoteMode || !quoteContext?.prescriptionId) return;
+    if (cart.length === 0) {
+      showNotification('Add at least one product to send quote');
+      return;
+    }
+    try {
+      const items = cart.map((it) => ({
+        productId: it.id,
+        medicineName: it.name,
+        dosage: '',
+        quantity: it.quantity,
+        unitPrice: it.price || 0,
+      }));
+      await API.post(`/prescriptions/${quoteContext.prescriptionId}/quote`, { items });
+      showNotification('Quote sent to patient');
+      navigate('/pharmacy-dashboard');
+    } catch (e) {
+      showNotification('Failed to send quote');
+    }
+  };
 
   return (
     <div className="bg-gray-100">
@@ -492,7 +613,7 @@ const Products = () => {
                           >
                             <div className="text-gray-800 font-medium">{suggestion}</div>
                             <div className="text-sm text-gray-500 mt-1">
-                              Found in {products.filter(p => p.name === suggestion).length} product(s)
+                              Found in {catalog().filter(p => p.name === suggestion).length} product(s)
                             </div>
                           </button>
                         ))}
@@ -680,11 +801,6 @@ const Products = () => {
                   className="bg-white rounded-lg shadow-sm hover:shadow-lg transition-all duration-300 overflow-hidden cursor-pointer group relative"
                 >
                   <div className="relative aspect-square bg-white border-b flex items-center justify-center p-4 overflow-hidden">
-                    {product.discount && (
-                      <span className="absolute top-2 left-2 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded z-10">
-                        {product.discount}
-                      </span>
-                    )}
                     <img
                       src={product.image}
                       alt={product.name}
@@ -708,17 +824,15 @@ const Products = () => {
                     <h3 className="text-sm font-medium text-gray-900 mb-2 line-clamp-2 min-h-[40px]">
                       {product.name}
                     </h3>
+                    <div className="text-xs text-gray-500 mb-2 min-h-[16px]">
+                      {[product.strength, product.dosageForm].filter(Boolean).join(' ') || ''}
+                    </div>
 
                     {product.price ? (
                       <div className="flex items-center gap-2">
                         <span className="text-primary font-bold text-base">
                           Rs.{product.price.toFixed(2)}
                         </span>
-                        {product.originalPrice && (
-                          <span className="text-gray-400 text-sm line-through">
-                            Rs.{product.originalPrice.toFixed(2)}
-                          </span>
-                        )}
                       </div>
                     ) : (
                       <span className="text-gray-500 text-sm">Price on request</span>
@@ -913,16 +1027,18 @@ const Products = () => {
                     <span>Download Invoice</span>
                   </button>
 
-                  {/* Checkout Button */}
-                  <button
-                    onClick={() => navigate('/pay', { state: { cart, totalPrice: getTotalPrice() } })}
-                    className="w-full bg-gradient-to-r from-primary to-emerald-600 hover:from-emerald-600 hover:to-primary text-white font-bold py-4 rounded-xl transition-all duration-300 shadow-lg hover:shadow-xl transform hover:scale-105 flex items-center justify-center gap-2"
-                  >
-                    <span>Proceed to Checkout</span>
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
-                    </svg>
-                  </button>
+                  {/* Checkout Button (hidden for pharmacies / quote mode) */}
+                  {!(quoteMode || isPharmacyRole) && (
+                    <button
+                      onClick={checkoutManual}
+                      className="w-full bg-gradient-to-r from-primary to-emerald-600 hover:from-emerald-600 hover:to-primary text-white font-bold py-4 rounded-xl transition-all duration-300 shadow-lg hover:shadow-xl transform hover:scale-105 flex items-center justify-center gap-2"
+                    >
+                      <span>Place Order</span>
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                      </svg>
+                    </button>
+                  )}
                   <p className="text-center text-xs text-gray-500 mt-2">
                     Secure checkout • Free delivery on orders above Rs.1000
                   </p>
@@ -931,6 +1047,18 @@ const Products = () => {
             )}
           </div>
         </>
+      )}
+
+      {/* Quote Mode Footer */}
+      {quoteMode && (
+        <div className="p-4 border-t bg-white">
+          <button
+            onClick={sendQuote}
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg"
+          >
+            Send Quote to Patient
+          </button>
+        </div>
       )}
 
       {/* Notification Modal - Bootstrap Style */}

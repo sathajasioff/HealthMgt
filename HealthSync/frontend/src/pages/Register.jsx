@@ -25,9 +25,35 @@ const Register = () => {
   });
 
   const [agreeTerms, setAgreeTerms] = useState(false);
-  const [profileImage, setProfileImage] = useState(null);
+  const currentUser = (() => { try { return JSON.parse(localStorage.getItem('user') || 'null'); } catch { return null; } })();
+  const currentRole = currentUser?.role?.toUpperCase?.() || '';
+  const canProvisionStaff = currentRole === 'STAFF' || currentRole === 'ADMIN';
+  const [profileImage, setProfileImage] = useState(null); // used as doctor's profile image when role=doctor
   const [imagePreview, setImagePreview] = useState(null);
   const [loading, setLoading] = useState(false);
+
+  // Doctor-specific fields (moved from staff form)
+  const [doctorDetails, setDoctorDetails] = useState({
+    speciality: 'General Physician',
+    experience: '',
+    phone: '',
+    fees: 1500,
+    availableToday: true,
+    rating: 4.8,
+  });
+  const [availability, setAvailability] = useState([
+    { day: 'MONDAY', startTime: '09:00', endTime: '12:00' }
+  ]);
+
+  // Pharmacy-specific fields
+  const [pharmacyDetails, setPharmacyDetails] = useState({
+    name: '',
+    address: '',
+    phone: '',
+    hours: '24/7',
+    rating: 4.7,
+    stock: 'Full Stock'
+  });
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -55,6 +81,25 @@ const Register = () => {
       return;
     }
 
+    // Pharmacy-specific validations
+    const selectedRole = formData.userRole.toUpperCase();
+    if (selectedRole === 'PHARMACY') {
+      const nameOk = (formData.fullName || '').trim().length > 0;
+      const phoneOk = (pharmacyDetails.phone || '').trim().length > 0;
+      const hoursOk = (pharmacyDetails.hours || '').trim().length > 0;
+      if (!nameOk || !phoneOk || !hoursOk) {
+        alert('Please fill all required pharmacy fields: name, phone, hours');
+        return;
+      }
+      // Email is taken from account email (formData.email), which is already required
+      const emailVal = (formData.email || '').trim();
+      const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRe.test(emailVal)) {
+        alert('Enter a valid email');
+        return;
+      }
+    }
+
     try {
       setLoading(true);
       const userPayload = {
@@ -63,13 +108,44 @@ const Register = () => {
         password: formData.password,
         role: formData.userRole.toUpperCase()
       };
-      if (profileImage) userPayload.profileImage = imagePreview;
-
-      const response = await API.post('/users/register', userPayload);
-      if (response.status === 200) {
-        alert(
-          `Registration successful! Welcome ${response.data.name} (${response.data.role})`
-        );
+      const userRes = await API.post('/users/register', userPayload);
+      if (userRes.status === 200) {
+        const role = userPayload.role;
+        if (role === 'DOCTOR') {
+          // Create doctor profile with extra details
+          const req = {
+            name: formData.fullName,
+            email: formData.email,
+            speciality: doctorDetails.speciality,
+            experience: doctorDetails.experience ? parseInt(doctorDetails.experience, 10) : 0,
+            phone: doctorDetails.phone,
+            fees: doctorDetails.fees ? parseFloat(doctorDetails.fees) : 0,
+            availableToday: !!doctorDetails.availableToday,
+            rating: doctorDetails.rating ? parseFloat(doctorDetails.rating) : 4.8,
+            availability
+          };
+          const fd = new FormData();
+          const blob = new Blob([JSON.stringify(req)], { type: 'application/json' });
+          fd.append('request', blob);
+          if (profileImage) {
+            fd.append('image', profileImage);
+          }
+          await API.post('/doctors', fd);
+        } else if (role === 'PHARMACY') {
+          // Create pharmacy profile linked to user
+          const payload = {
+            userId: userRes.data.id || userRes.data._id,
+            name: formData.fullName,
+            address: pharmacyDetails.address,
+            phone: pharmacyDetails.phone,
+            email: formData.email,
+            hours: pharmacyDetails.hours,
+            rating: pharmacyDetails.rating,
+            stock: pharmacyDetails.stock
+          };
+          await API.post('/pharmacies', payload);
+        }
+        alert(`Registration successful! Welcome ${userRes.data.name} (${userRes.data.role})`);
         navigate('/');
       }
     } catch (err) {
@@ -266,8 +342,163 @@ const Register = () => {
                     Staff
                   </span>
                 </label>
+
+                {/* Pharmacy */}
+                <label
+                  className={`relative flex flex-col items-center justify-center p-4 border-2 rounded-xl cursor-pointer transition-all duration-300 ${
+                    formData.userRole === 'pharmacy'
+                      ? 'border-primary bg-green-50 shadow-md scale-105'
+                      : 'border-gray-200 bg-white hover:border-primary/50 hover:shadow-sm'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="userRole"
+                    value="pharmacy"
+                    checked={formData.userRole === 'pharmacy'}
+                    onChange={handleChange}
+                    className="absolute top-3 right-3 w-4 h-4 text-primary"
+                  />
+                  <div
+                    className={`w-12 h-12 rounded-full flex items-center justify-center mb-2 ${
+                      formData.userRole === 'pharmacy'
+                        ? 'bg-primary/10'
+                        : 'bg-gray-100'
+                    }`}
+                  >
+                    <Stethoscope
+                      size={24}
+                      className={
+                        formData.userRole === 'pharmacy'
+                          ? 'text-primary'
+                          : 'text-gray-400'
+                      }
+                    />
+                  </div>
+                  <span
+                    className={`text-sm font-semibold ${
+                      formData.userRole === 'pharmacy'
+                        ? 'text-primary'
+                        : 'text-gray-700'
+                    }`}
+                  >
+                    Pharmacy
+                  </span>
+                </label>
+
+                {/* Hospital Staff (visible only for STAFF/ADMIN when provisioning) */}
+                {canProvisionStaff && (
+                <label
+                  className={`relative flex flex-col items-center justify-center p-4 border-2 rounded-xl cursor-pointer transition-all duration-300 ${
+                    formData.userRole === 'hospital_staff'
+                      ? 'border-primary bg-green-50 shadow-md scale-105'
+                      : 'border-gray-200 bg-white hover:border-primary/50 hover:shadow-sm'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="userRole"
+                    value="hospital_staff"
+                    checked={formData.userRole === 'hospital_staff'}
+                    onChange={handleChange}
+                    className="absolute top-3 right-3 w-4 h-4 text-primary"
+                  />
+                  <div
+                    className={`w-12 h-12 rounded-full flex items-center justify-center mb-2 ${
+                      formData.userRole === 'hospital_staff'
+                        ? 'bg-primary/10'
+                        : 'bg-gray-100'
+                    }`}
+                  >
+                    <Briefcase
+                      size={24}
+                      className={
+                        formData.userRole === 'hospital_staff'
+                          ? 'text-primary'
+                          : 'text-gray-400'
+                      }
+                    />
+                  </div>
+                  <span
+                    className={`text-sm font-semibold ${
+                      formData.userRole === 'hospital_staff'
+                        ? 'text-primary'
+                        : 'text-gray-700'
+                    }`}
+                  >
+                    Hospital Staff
+                  </span>
+                </label>
+                )}
+
+                {/* Paramedic (visible only for STAFF/ADMIN when provisioning) */}
+                {canProvisionStaff && (
+                <label
+                  className={`relative flex flex-col items-center justify-center p-4 border-2 rounded-xl cursor-pointer transition-all duration-300 ${
+                    formData.userRole === 'paramedic'
+                      ? 'border-primary bg-green-50 shadow-md scale-105'
+                      : 'border-gray-200 bg-white hover:border-primary/50 hover:shadow-sm'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="userRole"
+                    value="paramedic"
+                    checked={formData.userRole === 'paramedic'}
+                    onChange={handleChange}
+                    className="absolute top-3 right-3 w-4 h-4 text-primary"
+                  />
+                  <div
+                    className={`w-12 h-12 rounded-full flex items-center justify-center mb-2 ${
+                      formData.userRole === 'paramedic'
+                        ? 'bg-primary/10'
+                        : 'bg-gray-100'
+                    }`}
+                  >
+                    <Stethoscope
+                      size={24}
+                      className={
+                        formData.userRole === 'paramedic'
+                          ? 'text-primary'
+                          : 'text-gray-400'
+                      }
+                    />
+                  </div>
+                  <span
+                    className={`text-sm font-semibold ${
+                      formData.userRole === 'paramedic'
+                        ? 'text-primary'
+                        : 'text-gray-700'
+                    }`}
+                  >
+                    Paramedic
+                  </span>
+                </label>
+                )}
               </div>
             </div>
+
+            {/* Pharmacy extra fields (visible when role is Pharmacy) */}
+            {formData.userRole === 'pharmacy' && (
+              <div className="space-y-3 mb-5 border border-gray-200 rounded-xl p-4 bg-gray-50">
+                <h3 className="text-sm font-semibold text-gray-700">Pharmacy Details</h3>
+                <p className="text-xs text-gray-500">Pharmacy will use your account Name and Email. Provide contact details below.</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
+                    <input value={pharmacyDetails.address} onChange={(e) => setPharmacyDetails({ ...pharmacyDetails, address: e.target.value })} className="w-full px-3 py-2 bg-white border-2 border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+                    <input value={pharmacyDetails.phone} onChange={(e) => setPharmacyDetails({ ...pharmacyDetails, phone: e.target.value })} className="w-full px-3 py-2 bg-white border-2 border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary" required />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Hours</label>
+                    <input value={pharmacyDetails.hours} onChange={(e) => setPharmacyDetails({ ...pharmacyDetails, hours: e.target.value })} className="w-full px-3 py-2 bg-white border-2 border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary" required />
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Form */}
             <form onSubmit={handleSubmit} className="space-y-4">
@@ -326,6 +557,76 @@ const Register = () => {
                 />
                 <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
               </div>
+
+              {/* Doctor extra fields */}
+              {formData.userRole === 'doctor' && (
+                <div className="space-y-3 mt-3">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Speciality</label>
+                      <select
+                        value={doctorDetails.speciality}
+                        onChange={(e) => setDoctorDetails({ ...doctorDetails, speciality: e.target.value })}
+                        className="w-full px-3 py-2 bg-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                      >
+                        {['General Physician','Cardiologist','Neurologist','Dentist','Dermatologist','Pediatrician','Orthopedic','ENT Specialist','Psychiatrist','Gastroenterologist'].map((s) => (
+                          <option key={s} value={s}>{s}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Experience (years)</label>
+                      <input type="number" min={0} value={doctorDetails.experience} onChange={(e) => setDoctorDetails({ ...doctorDetails, experience: e.target.value })} className="w-full px-3 py-2 bg-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Consultation Fees (Rs.)</label>
+                      <input type="number" min={0} value={doctorDetails.fees} onChange={(e) => setDoctorDetails({ ...doctorDetails, fees: e.target.value })} className="w-full px-3 py-2 bg-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+                      <input value={doctorDetails.phone} onChange={(e) => setDoctorDetails({ ...doctorDetails, phone: e.target.value })} className="w-full px-3 py-2 bg-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary" placeholder="071 234 5678" />
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <input id="docAvailableToday" type="checkbox" checked={doctorDetails.availableToday} onChange={(e) => setDoctorDetails({ ...doctorDetails, availableToday: e.target.checked })} className="w-4 h-4 text-primary border-gray-300 rounded focus:ring-primary" />
+                      <label htmlFor="docAvailableToday" className="text-sm text-gray-700">Available Today</label>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Rating</label>
+                      <input type="number" step="0.1" min={0} max={5} value={doctorDetails.rating} onChange={(e) => setDoctorDetails({ ...doctorDetails, rating: e.target.value })} className="w-full px-3 py-2 bg-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary" />
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Doctor Profile Image</label>
+                      <input type="file" accept="image/*" onChange={handleImageChange} className="w-full px-3 py-2 bg-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Availability Slots</label>
+                    <div className="space-y-2">
+                      {availability.map((slot, idx) => (
+                        <div key={idx} className="grid grid-cols-1 md:grid-cols-12 gap-2 items-end">
+                          <div className="md:col-span-4">
+                            <select value={slot.day} onChange={(e) => setAvailability(prev => prev.map((s,i)=> i===idx?{...s, day:e.target.value}:s))} className="w-full px-3 py-2 bg-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary">
+                              {['MONDAY','TUESDAY','WEDNESDAY','THURSDAY','FRIDAY','SATURDAY','SUNDAY'].map(d => (
+                                <option key={d} value={d}>{d}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="md:col-span-3">
+                            <input type="time" value={slot.startTime} onChange={(e) => setAvailability(prev => prev.map((s,i)=> i===idx?{...s, startTime:e.target.value}:s))} className="w-full px-3 py-2 bg-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary" />
+                          </div>
+                          <div className="md:col-span-3">
+                            <input type="time" value={slot.endTime} onChange={(e) => setAvailability(prev => prev.map((s,i)=> i===idx?{...s, endTime:e.target.value}:s))} className="w-full px-3 py-2 bg-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary" />
+                          </div>
+                          <div className="md:col-span-2">
+                            <button type="button" onClick={() => setAvailability(prev => prev.filter((_,i)=> i!==idx))} className="px-3 py-2 border-2 border-red-300 text-red-600 rounded-lg">Remove</button>
+                          </div>
+                        </div>
+                      ))}
+                      <button type="button" onClick={() => setAvailability(prev => [...prev, { day:'MONDAY', startTime:'09:00', endTime:'12:00'}])} className="mt-1 px-4 py-2 border-2 border-primary text-primary rounded-lg">Add Slot</button>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Terms checkbox */}
               <div className="flex items-center space-x-2 mt-2">

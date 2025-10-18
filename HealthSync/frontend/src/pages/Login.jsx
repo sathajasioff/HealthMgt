@@ -37,8 +37,11 @@ const Login = () => {
 
         // redirect based on role
         const role = user.role?.toUpperCase();
-        if (role === 'DOCTOR') navigate('/doctor-dashboard');
+        if (role === 'DOCTOR') navigate('/dashboard');
         else if (role === 'STAFF') navigate('/staff-dashboard');
+        else if (role === 'PHARMACY') navigate('/pharmacy-dashboard');
+        else if (role === 'HOSPITAL_STAFF') navigate('/hospital-dashboard');
+        else if (role === 'PARAMEDIC') navigate('/paramedics-dashboard');
         else navigate('/dashboard');
       }
     } catch (err) {

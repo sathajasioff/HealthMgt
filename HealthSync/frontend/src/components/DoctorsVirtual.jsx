@@ -1,14 +1,107 @@
-import React, { useState } from 'react';
-import { Search, Grid, List, Calendar, Phone, X } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Search, Grid, List, Calendar, X } from 'lucide-react';
 import { doctors } from '../assets/assets';
-import { useNavigate } from 'react-router-dom';
+import PatientAvailabilityModal from './PatientAvailabilityModal';
+import { useNotification } from '../context/NotificationContext';
 import 'bootstrap-icons/font/bootstrap-icons.css';
+import API from '../services/api';
 
 const DoctorsVirtual = () => {
   const [activeCategory, setActiveCategory] = useState('ALL');
   const [viewMode, setViewMode] = useState('grid');
   const [searchQuery, setSearchQuery] = useState('');
-  const navigate = useNavigate();
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedDoctor, setSelectedDoctor] = useState(null);
+  const [allDoctors, setAllDoctors] = useState([]);
+  const { showToast, addNotification } = useNotification();
+
+  // Prefer loading from backend; fallback to localStorage + static
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res = await API.get('/doctors');
+        if (cancelled) return;
+        const serverDoctors = Array.isArray(res.data) ? res.data : [];
+        // Map backend model to UI shape without changing UI components
+        const apiBase = API.defaults.baseURL || '';
+        const origin = apiBase.replace(/\/?api\/?$/, '');
+        const toAbsolute = (url) => {
+          if (!url) return 'https://via.placeholder.com/150';
+          if (/^https?:\/\//i.test(url)) return url;
+          return `${origin}${url.startsWith('/') ? '' : '/'}${url}`;
+        };
+        const mapped = serverDoctors.map((d) => ({
+          id: d.id || d._id || `${d.name}-${Math.random()}`,
+          name: d.name,
+          speciality: d.speciality,
+          rating: d.rating ?? 4.8,
+          image: toAbsolute(d.imageUrl),
+          degree: 'Consultant',
+          experience: d.experience != null ? `${d.experience} yrs` : '—',
+        }));
+        setAllDoctors(mapped);
+      } catch (e) {
+        const staffAddedDoctors = JSON.parse(localStorage.getItem('doctors') || '[]');
+        const combinedDoctors = [...doctors, ...staffAddedDoctors];
+        setAllDoctors(combinedDoctors);
+      }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, []);
+
+  const handleAvailabilityClick = (doctor) => {
+    setSelectedDoctor(doctor);
+    setIsModalOpen(true);
+  };
+
+  const handlePatientSubmit = (patientData) => {
+    // Use the selected time from the form
+    const appointmentTime = patientData.selectedTime;
+
+    // Create new appointment object with selected doctor info
+    const newAppointment = {
+      name: selectedDoctor.name,
+      specialization: selectedDoctor.speciality,
+      time: appointmentTime,
+      patient: patientData.patientName,
+      patientAge: patientData.age,
+      patientGender: patientData.gender,
+      healthIssue: patientData.healthIssue,
+      status: 'Waiting',
+      statusColor: 'bg-yellow-500',
+      type: 'Scheduled',
+      isNew: true
+    };
+
+    // Get existing appointments from localStorage
+    const existingAppointments = JSON.parse(localStorage.getItem('newPatients') || '[]');
+    
+    // Add new appointment at the beginning
+    const updatedAppointments = [newAppointment, ...existingAppointments];
+    
+    // Save to localStorage
+    localStorage.setItem('newPatients', JSON.stringify(updatedAppointments));
+    
+    // Show beautiful toast notification
+    const toastMessage = `Appointment booked successfully with ${selectedDoctor.name}!\nPatient: ${patientData.patientName}\nTime: ${appointmentTime}`;
+    showToast(toastMessage, 'success', 5000);
+    
+    // Add to notification center
+    addNotification({
+      type: 'appointment',
+      title: 'New Appointment Booked',
+      message: `${patientData.patientName} has booked an appointment with ${selectedDoctor.name}`,
+      details: {
+        doctor: selectedDoctor.name,
+        patient: patientData.patientName,
+        time: appointmentTime,
+        specialization: selectedDoctor.speciality,
+        healthIssue: patientData.healthIssue
+      }
+    });
+  };
 
   const categories = [
     'ALL',
@@ -20,10 +113,17 @@ const DoctorsVirtual = () => {
     'Gastroenterologist'
   ];
 
-  const filteredDoctors = doctors.filter(doctor => {
-    const matchesCategory = activeCategory === 'ALL' || doctor.speciality === activeCategory;
-    const matchesSearch = doctor.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         doctor.speciality.toLowerCase().includes(searchQuery.toLowerCase());
+  const normalize = (s = '') => {
+    const t = s.toLowerCase().trim().replace(/\s+/g, ' ');
+    return t.endsWith('s') ? t.slice(0, -1) : t;
+  };
+
+  const filteredDoctors = allDoctors.filter(doctor => {
+    const isAll = activeCategory === 'ALL';
+    const matchesCategory = isAll || normalize(doctor.speciality) === normalize(activeCategory);
+    const q = searchQuery.toLowerCase();
+    const matchesSearch = doctor.name.toLowerCase().includes(q) ||
+                         (doctor.speciality || '').toLowerCase().includes(q);
     return matchesCategory && matchesSearch;
   });
 
@@ -109,9 +209,9 @@ const DoctorsVirtual = () => {
             ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4' 
             : 'grid-cols-1'
         } gap-5`}>
-          {filteredDoctors.map((doctor) => (
+          {filteredDoctors.map((doctor, idx) => (
             <div
-              key={doctor._id}
+              key={doctor.id || doctor._id || idx}
               className="bg-white rounded-2xl shadow-sm hover:shadow-xl transition-all duration-300 p-6 border border-gray-100  group hover:-translate-y-1"
             >
               {/* Rating Badge */}
@@ -150,16 +250,12 @@ const DoctorsVirtual = () => {
 
               {/* Action Buttons */}
               <div className="flex items-center gap-2 pt-5 border-t border-gray-100">
-                <button className="flex-1 flex items-center justify-center gap-2 py-2.5 text-gray-600  rounded-lg transition-all duration-200 text-sm font-medium">
-                  <Calendar size={16} />
-                  <span>Availability</span>
-                </button>
                 <button 
-                  onClick={() => navigate('/homeroom')}
-                  className="flex-1 flex items-center justify-center gap-2 py-2.5 text-gray-600 rounded-lg transition-all duration-200 text-sm font-medium"
+                  onClick={() => handleAvailabilityClick(doctor)}
+                  className="flex-1 flex items-center justify-center gap-2 py-2.5 text-gray-600 hover:bg-gray-50 rounded-lg transition-all duration-200 text-sm font-medium"
                 >
-                  <Phone size={16} />
-                  <span>Make a call</span>
+                  <Calendar size={16} />
+                  <span>Book Appointment</span>
                 </button>
               </div>
             </div>
@@ -179,6 +275,14 @@ const DoctorsVirtual = () => {
           </div>
         )}
       </div>
+
+      {/* Patient Availability Modal */}
+      <PatientAvailabilityModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        onSubmit={handlePatientSubmit}
+        selectedDoctor={selectedDoctor}
+      />
     </div>
   );
 };

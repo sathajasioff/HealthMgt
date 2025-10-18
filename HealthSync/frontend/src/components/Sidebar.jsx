@@ -11,16 +11,29 @@ import {
   GraduationCap,
   LogOut,
   ClipboardList,
-  CalendarCheck
+  CalendarCheck,
+  Pill
 } from 'lucide-react';
 
 const Sidebar = ({ token, setToken }) => {
   const navigate = useNavigate();
+  const user = JSON.parse(localStorage.getItem('user') || 'null');
+  const role = user?.role?.toUpperCase?.() || '';
+  const dashboardPath =
+    role === 'STAFF' ? '/staff-dashboard'
+    : role === 'PHARMACY' ? '/pharmacy-dashboard'
+    : role === 'HOSPITAL_STAFF' ? '/hospital-dashboard'
+    : role === 'PARAMEDIC' ? '/paramedics-dashboard'
+    : '/dashboard';
 
   const menuItems = [
-    { name: 'Dashboard', icon: LayoutDashboard, path: '/dashboard' },
+    { name: 'Dashboard', icon: LayoutDashboard, path: dashboardPath },
     { name: 'Virtual Conference', icon: Video, path: '/virtual' },
-    { name: 'Medical Records', icon: ClipboardList, path: '/medical-records' },
+    ...(role === 'PATIENT' ? [
+      { name: 'Medical Records', icon: ClipboardList, path: '/medical-records' },
+      { name: 'Pharmacy', icon: Pill, path: '/pharmacy' },
+      { name: 'My Orders', icon: FileText, path: '/orders' },
+    ] : []),
     { name: 'Products', icon: ShoppingBag, path: '/order' },
     { name: 'Check-Ups', icon: CalendarCheck, path: '/appointments', scrollTo: 'appointments-section' },
   ];
@@ -28,7 +41,7 @@ const Sidebar = ({ token, setToken }) => {
   const handleNavClick = (e, item) => {
     if (item.scrollTo) {
       e.preventDefault();
-      navigate('/dashboard');
+      navigate(dashboardPath);
       setTimeout(() => {
         const element = document.getElementById(item.scrollTo);
         if (element) {
